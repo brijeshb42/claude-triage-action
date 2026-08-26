@@ -1,0 +1,5 @@
+{
+  "name": "mui-triage-ci",
+  "description": "Non-interactive MUI issue investigation inside a Cloudflare Sandbox",
+  "version": "0.0.1"
+}

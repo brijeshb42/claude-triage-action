@@ -1,0 +1,8 @@
+node_modules/
+bridge/node_modules/
+.wrangler/
+bridge/.wrangler/
+coverage/
+*.log
+.dev.vars
+bridge/.dev.vars

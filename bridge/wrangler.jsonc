@@ -12,6 +12,9 @@
       "head_sampling_rate": 1,
     },
   },
+  "secrets": {
+    "required": ["SANDBOX_API_KEY"],
+  },
   "containers": [
     {
       "class_name": "Sandbox",

@@ -1,0 +1,69 @@
+name: Set up Cloudflare Sandbox tools
+description: Hydrate a tracked checkout into Cloudflare Sandbox and prepare a Claude Code MCP configuration.
+
+inputs:
+  api-url:
+    description: URL of the deployed Cloudflare Sandbox Bridge.
+    required: true
+  api-key:
+    description: Bearer token for the Cloudflare Sandbox Bridge.
+    required: true
+  working-directory:
+    description: Tracked Git checkout to hydrate.
+    default: .
+  issue-context:
+    description: Optional JSON issue context to place outside the sandbox repository.
+    required: false
+
+outputs:
+  sandbox-id:
+    description: Created Cloudflare Sandbox ID.
+    value: ${{ steps.setup.outputs.sandbox-id }}
+  mcp-config:
+    description: Path to the generated Claude Code MCP configuration.
+    value: ${{ steps.setup.outputs.mcp-config }}
+  cli-path:
+    description: Path to the trusted sandbox lifecycle CLI.
+    value: ${{ steps.setup.outputs.cli-path }}
+  plugin-dir:
+    description: Path to the trusted non-interactive triage skill plugin.
+    value: ${{ steps.setup.outputs.plugin-dir }}
+
+runs:
+  using: composite
+  steps:
+    - name: Create and hydrate sandbox
+      id: setup
+      shell: bash
+      env:
+        SANDBOX_API_URL: ${{ inputs.api-url }}
+        SANDBOX_API_KEY: ${{ inputs.api-key }}
+        REPOSITORY_DIRECTORY: ${{ inputs.working-directory }}
+        ISSUE_CONTEXT: ${{ inputs.issue-context }}
+      run: |
+        set -euo pipefail
+        sandbox_id="$(node "$GITHUB_ACTION_PATH/dist/sandbox-cli.mjs" create)"
+        cleanup() {
+          node "$GITHUB_ACTION_PATH/dist/sandbox-cli.mjs" destroy "$sandbox_id" || true
+        }
+        trap cleanup ERR
+
+        node "$GITHUB_ACTION_PATH/dist/sandbox-cli.mjs" hydrate-worktree \
+          "$sandbox_id" "$REPOSITORY_DIRECTORY"
+
+        if [ -n "$ISSUE_CONTEXT" ]; then
+          node "$GITHUB_ACTION_PATH/dist/sandbox-cli.mjs" upload-issue-context \
+            "$sandbox_id" "$ISSUE_CONTEXT"
+        fi
+
+        mcp_config="$RUNNER_TEMP/cloudflare-sandbox-$sandbox_id.mcp.json"
+        node "$GITHUB_ACTION_PATH/dist/sandbox-cli.mjs" mcp-config \
+          "$GITHUB_ACTION_PATH/dist/sandbox-mcp.mjs" > "$mcp_config"
+
+        {
+          echo "sandbox-id=$sandbox_id"
+          echo "mcp-config=$mcp_config"
+          echo "cli-path=$GITHUB_ACTION_PATH/dist/sandbox-cli.mjs"
+          echo "plugin-dir=$GITHUB_ACTION_PATH/plugin"
+        } >> "$GITHUB_OUTPUT"
+        trap - ERR

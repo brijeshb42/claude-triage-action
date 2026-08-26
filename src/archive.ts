@@ -1,5 +1,5 @@
 import { execFile, spawn } from 'node:child_process';
-import { lstat, mkdtemp, readFile, rm, stat } from 'node:fs/promises';
+import { lstat, mkdtemp, readFile, rm, stat, symlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import * as path from 'node:path';
 import { promisify } from 'node:util';
@@ -76,23 +76,15 @@ async function trackedFiles(repositoryDirectory: string): Promise<TrackedFile[]>
 }
 
 async function createTar(
-  repositoryDirectory: string,
+  archiveSourceDirectory: string,
   destination: string,
   files: TrackedFile[],
 ): Promise<void> {
   await new Promise<void>((resolve, reject) => {
     const tarProcess = spawn(
       'tar',
-      [
-        '--null',
-        '--files-from=-',
-        '--no-recursion',
-        '--transform=flags=r;s,^,repo/,',
-        '--create',
-        '--file',
-        destination,
-      ],
-      { cwd: repositoryDirectory, stdio: ['pipe', 'inherit', 'inherit'] },
+      ['--null', '--no-recursion', '--create', '--file', destination, '--files-from=-'],
+      { cwd: archiveSourceDirectory, stdio: ['pipe', 'inherit', 'inherit'] },
     );
     tarProcess.once('error', reject);
     tarProcess.once('exit', (exitCode) => {
@@ -102,7 +94,7 @@ async function createTar(
         reject(new Error(`tar exited with code ${exitCode ?? 'unknown'}.`));
       }
     });
-    tarProcess.stdin.end(`${files.map((file) => file.name).join('\0')}\0`);
+    tarProcess.stdin.end(`${files.map((file) => `repo/${file.name}`).join('\0')}\0`);
   });
 }
 
@@ -117,10 +109,11 @@ export async function createArchiveChunks(repositoryDirectory: string): Promise<
   const temporaryDirectory = await mkdtemp(path.join(tmpdir(), 'claude-triage-archives-'));
 
   try {
+    await symlink(repositoryDirectory, path.join(temporaryDirectory, 'repo'), 'dir');
     const chunks: ArchiveChunk[] = [];
     for (const [index, plannedFiles] of plans.entries()) {
       const archivePath = path.join(temporaryDirectory, `chunk-${index}.tar`);
-      await createTar(repositoryDirectory, archivePath, plannedFiles);
+      await createTar(temporaryDirectory, archivePath, plannedFiles);
       const archiveStats = await stat(archivePath);
       if (archiveStats.size > MAX_ARCHIVE_BYTES) {
         throw new Error(

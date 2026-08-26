@@ -27,13 +27,19 @@ The checked-in `dist/` files are part of the action and must be rebuilt after ch
 ## Deploying the bridge
 
 The bridge follows Cloudflare's Apache-2.0 licensed Sandbox Bridge template. Authenticate
-Wrangler, set a bridge bearer token, and deploy:
+Wrangler, set a bridge bearer token, and deploy. Cloudflare Containers currently requires
+a Workers Paid plan and a Docker-compatible builder:
 
 ```bash
 pnpm --dir bridge install
 pnpm --dir bridge exec wrangler secret put SANDBOX_API_KEY
 pnpm --dir bridge run deploy
 ```
+
+For builders without Docker, `.github/workflows/deploy-bridge.yml` performs the container
+build on a GitHub-hosted runner. Add a scoped `CLOUDFLARE_API_TOKEN` secret, set the
+`CLOUDFLARE_ACCOUNT_ID` variable, and set `CLOUDFLARE_DEPLOY_ENABLED=true` only while a
+deployment is intended.
 
 The container image is pinned to the same version as `@cloudflare/sandbox` and adds the
 Node.js and pnpm versions used by MUI.

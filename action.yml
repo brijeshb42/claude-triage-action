@@ -146,7 +146,7 @@ runs:
 
     - name: Triage and attempt a fix
       id: claude
-      uses: anthropics/claude-code-action@c81e3bc69d1b18badbb63ba39581218f02421678 # v1.0.201
+      uses: anthropics/claude-code-action/base-action@c81e3bc69d1b18badbb63ba39581218f02421678 # v1.0.201
       env:
         SANDBOX_API_URL: ${{ inputs.sandbox-api-url }}
         SANDBOX_API_KEY: ${{ inputs.sandbox-api-key }}
@@ -158,8 +158,6 @@ runs:
         anthropic_organization_id: ${{ inputs.anthropic-organization-id }}
         anthropic_service_account_id: ${{ inputs.anthropic-service-account-id }}
         anthropic_workspace_id: ${{ inputs.anthropic-workspace-id }}
-        github_token: ${{ inputs.github-token }}
-        display_report: false
         show_full_output: ${{ inputs.show-full-output }}
         prompt: |
           Triage issue #${{ inputs.issue-number }} and attempt a focused fix.

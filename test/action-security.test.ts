@@ -35,6 +35,18 @@ describe('triage action isolation', () => {
     }
   });
 
+  it('keeps the GitHub token out of the Claude process', async () => {
+    const actionFiles = [actionPath, fixActionPath, triageActionPath];
+
+    for (const actionFile of actionFiles) {
+      const action = await readFile(actionFile, 'utf8');
+
+      assert.match(action, /anthropics\/claude-code-action\/base-action@/);
+      assert.doesNotMatch(action, /^\s+github_token:/m);
+      assert.doesNotMatch(action, /^\s+display_report:/m);
+    }
+  });
+
   it('is a runner-agnostic composite action', async () => {
     const action = await readFile(actionPath, 'utf8');
 

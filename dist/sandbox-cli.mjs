@@ -1185,8 +1185,8 @@ var require_valid = __commonJS({
 });
 
 // src/sandbox-cli.ts
-import { readFile as readFile2, writeFile } from "node:fs/promises";
-import * as path3 from "node:path";
+import { readFile as readFile3, writeFile } from "node:fs/promises";
+import * as path4 from "node:path";
 import { pathToFileURL } from "node:url";
 
 // src/archive.ts
@@ -1474,10 +1474,7 @@ function loadBridgeEnvironment() {
   };
 }
 
-// src/node-runtime.ts
-var import_compare = __toESM(require_compare(), 1);
-var import_satisfies = __toESM(require_satisfies(), 1);
-var import_valid = __toESM(require_valid(), 1);
+// src/dependency-install.ts
 import { lstat as lstat2, readFile } from "node:fs/promises";
 import * as path2 from "node:path";
 
@@ -1487,8 +1484,143 @@ function assertNodeBinPath(nodeBinPath) {
     throw new Error(`Unexpected sandbox Node.js binary path: ${nodeBinPath}.`);
   }
 }
+function createRepositoryCommand(command, nodeBinPath) {
+  assertNodeBinPath(nodeBinPath);
+  return `export PATH='${nodeBinPath}':$PATH
+${command}`;
+}
+
+// src/dependency-install.ts
+function parsePackageManager(packageJson) {
+  if (!packageJson) {
+    return void 0;
+  }
+  const value = JSON.parse(packageJson);
+  if (typeof value !== "object" || value === null) {
+    throw new Error("The root package.json must contain a JSON object.");
+  }
+  return "packageManager" in value && typeof value.packageManager === "string" ? value.packageManager.trim() : void 0;
+}
+function yarnInstallCommand(packageManager) {
+  const majorVersion = packageManager?.match(/^yarn@(\d+)/)?.[1];
+  return majorVersion && Number(majorVersion) >= 2 ? "yarn install --immutable" : "yarn install --frozen-lockfile";
+}
+function detectDependencyInstallPlan(sources, requestedCommand = "auto") {
+  const normalizedCommand = requestedCommand.trim();
+  if (!normalizedCommand || normalizedCommand === "none") {
+    return { source: "disabled by action input" };
+  }
+  if (normalizedCommand !== "auto") {
+    if (normalizedCommand.length > 1e4 || normalizedCommand.includes("\0")) {
+      throw new Error("The dependency install command is invalid.");
+    }
+    return { command: normalizedCommand, source: "action input" };
+  }
+  const packageManager = parsePackageManager(sources.packageJson);
+  if (sources.pnpmLock) {
+    return { command: "pnpm install --prefer-offline", source: "pnpm-lock.yaml" };
+  }
+  if (sources.npmLock) {
+    return { command: "npm ci --prefer-offline", source: "npm lockfile" };
+  }
+  if (sources.yarnLock) {
+    return { command: yarnInstallCommand(packageManager), source: "yarn.lock" };
+  }
+  return { source: "no supported lockfile" };
+}
+async function readOptionalRegularFile(filePath) {
+  try {
+    const stats = await lstat2(filePath);
+    if (!stats.isFile()) {
+      return void 0;
+    }
+    if (stats.size > 1024 * 1024) {
+      throw new Error(`${filePath} is too large to use as package-manager configuration.`);
+    }
+    return await readFile(filePath, "utf8");
+  } catch (error) {
+    if (typeof error === "object" && error !== null && "code" in error && error.code === "ENOENT") {
+      return void 0;
+    }
+    throw error;
+  }
+}
+async function isRegularFile(filePath) {
+  try {
+    return (await lstat2(filePath)).isFile();
+  } catch (error) {
+    if (typeof error === "object" && error !== null && "code" in error && error.code === "ENOENT") {
+      return false;
+    }
+    throw error;
+  }
+}
+async function installRepositoryDependencies(client, sandboxId, repositoryDirectory, nodeBinPath, requestedCommand = "auto", timeoutMs = 12e5) {
+  const [packageJson, pnpmLock, npmPackageLock, npmShrinkwrap, yarnLock] = await Promise.all([
+    readOptionalRegularFile(path2.join(repositoryDirectory, "package.json")),
+    isRegularFile(path2.join(repositoryDirectory, "pnpm-lock.yaml")),
+    isRegularFile(path2.join(repositoryDirectory, "package-lock.json")),
+    isRegularFile(path2.join(repositoryDirectory, "npm-shrinkwrap.json")),
+    isRegularFile(path2.join(repositoryDirectory, "yarn.lock"))
+  ]);
+  const plan = detectDependencyInstallPlan(
+    {
+      ...packageJson === void 0 ? {} : { packageJson },
+      pnpmLock,
+      npmLock: npmPackageLock || npmShrinkwrap,
+      yarnLock
+    },
+    requestedCommand
+  );
+  if (!plan.command) {
+    process.stderr.write(`Skipped dependency installation: ${plan.source}.
+`);
+    return plan;
+  }
+  process.stderr.write(
+    `Installing sandbox dependencies with ${JSON.stringify(plan.command)} from ${plan.source} (timeout ${timeoutMs}ms).
+`
+  );
+  const result = await client.exec(
+    sandboxId,
+    ["bash", "-lc", createRepositoryCommand(`set -euo pipefail
+${plan.command}`, nodeBinPath)],
+    { timeoutMs, maxOutputChars: 1024 * 1024 }
+  );
+  process.stdout.write(result.stdout);
+  process.stderr.write(result.stderr);
+  if (result.exitCode !== 0 || result.stdoutTruncated || result.stderrTruncated) {
+    throw new Error(
+      `Dependency installation failed with exit code ${result.exitCode}${result.stdoutTruncated || result.stderrTruncated ? " and truncated output" : ""}.`
+    );
+  }
+  const status = await client.exec(
+    sandboxId,
+    ["git", "status", "--porcelain=v1", "--untracked-files=all"],
+    { timeoutMs: 12e4, maxOutputChars: 1024 * 1024 }
+  );
+  if (status.exitCode !== 0 || status.stdoutTruncated || status.stderrTruncated) {
+    throw new Error(
+      `Could not verify the repository after dependency installation: ${status.stderr}`
+    );
+  }
+  if (status.stdout.trim()) {
+    throw new Error(
+      `Dependency installation changed the sandbox baseline:
+${status.stdout.trim()}
+Use an immutable install command or disable automatic installation.`
+    );
+  }
+  process.stderr.write("Sandbox dependency installation completed without source changes.\n");
+  return plan;
+}
 
 // src/node-runtime.ts
+var import_compare = __toESM(require_compare(), 1);
+var import_satisfies = __toESM(require_satisfies(), 1);
+var import_valid = __toESM(require_valid(), 1);
+import { lstat as lstat3, readFile as readFile2 } from "node:fs/promises";
+import * as path3 from "node:path";
 var DEFAULT_NODE_VERSION = "22.23.2";
 var NODE_DOWNLOAD_ROOT = "https://nodejs.org/download/release";
 var NODE_RELEASE_INDEX_URL = "https://nodejs.org/dist/index.json";
@@ -1559,16 +1691,16 @@ function findNodeArchiveChecksum(manifest, archiveName) {
   }
   throw new Error(`Node.js checksum manifest does not contain ${archiveName}.`);
 }
-async function readOptionalRegularFile(filePath) {
+async function readOptionalRegularFile2(filePath) {
   try {
-    const stats = await lstat2(filePath);
+    const stats = await lstat3(filePath);
     if (!stats.isFile()) {
       return void 0;
     }
     if (stats.size > 1024 * 1024) {
       throw new Error(`${filePath} is too large to use as Node.js configuration.`);
     }
-    return await readFile(filePath, "utf8");
+    return await readFile2(filePath, "utf8");
   } catch (error) {
     if (typeof error === "object" && error !== null && "code" in error && error.code === "ENOENT") {
       return void 0;
@@ -1660,9 +1792,9 @@ async function installNodeRelease(client, sandboxId, release) {
 }
 async function prepareNodeRuntime(client, sandboxId, repositoryDirectory, requestedVersion = "auto") {
   const sources = await Promise.all([
-    readOptionalRegularFile(path2.join(repositoryDirectory, "package.json")),
-    readOptionalRegularFile(path2.join(repositoryDirectory, ".node-version")),
-    readOptionalRegularFile(path2.join(repositoryDirectory, ".nvmrc"))
+    readOptionalRegularFile2(path3.join(repositoryDirectory, "package.json")),
+    readOptionalRegularFile2(path3.join(repositoryDirectory, ".node-version")),
+    readOptionalRegularFile2(path3.join(repositoryDirectory, ".nvmrc"))
   ]);
   const requirement = detectNodeRequirement(
     {
@@ -1693,6 +1825,13 @@ function requiredArgument(value, description) {
     throw new Error(`Missing ${description}.`);
   }
   return value;
+}
+function positiveInteger(value, description) {
+  const parsed = Number(value);
+  if (!Number.isSafeInteger(parsed) || parsed <= 0) {
+    throw new Error(`Invalid ${description}: ${JSON.stringify(value)}.`);
+  }
+  return parsed;
 }
 function parseSnapshotExclusions(value) {
   return (value ?? "").split(/\r?\n/).map((pattern) => pattern.trim()).filter((pattern) => pattern.length > 0 && !pattern.startsWith("#"));
@@ -1848,7 +1987,7 @@ async function main() {
   }
   if (command === "hydrate-worktree") {
     const sandboxId = requiredArgument(args[0], "sandbox ID");
-    const repositoryDirectory = path3.resolve(requiredArgument(args[1], "repository directory"));
+    const repositoryDirectory = path4.resolve(requiredArgument(args[1], "repository directory"));
     const snapshotExclusions = parseSnapshotExclusions(args[2]);
     const archive = await createRepositoryArchive(
       repositoryDirectory,
@@ -1879,7 +2018,7 @@ async function main() {
   }
   if (command === "prepare-node") {
     const sandboxId = requiredArgument(args[0], "sandbox ID");
-    const repositoryDirectory = path3.resolve(requiredArgument(args[1], "repository directory"));
+    const repositoryDirectory = path4.resolve(requiredArgument(args[1], "repository directory"));
     const requestedVersion = args[2] || "auto";
     const runtime = await prepareNodeRuntime(
       client,
@@ -1895,9 +2034,25 @@ async function main() {
 `);
     return;
   }
+  if (command === "install-dependencies") {
+    const sandboxId = requiredArgument(args[0], "sandbox ID");
+    const repositoryDirectory = path4.resolve(requiredArgument(args[1], "repository directory"));
+    const nodeBinPath = requiredArgument(args[2], "Node.js binary path");
+    const requestedCommand = args[3] || "auto";
+    const timeoutMs = positiveInteger(args[4] || "1200000", "dependency install timeout");
+    await installRepositoryDependencies(
+      client,
+      sandboxId,
+      repositoryDirectory,
+      nodeBinPath,
+      requestedCommand,
+      timeoutMs
+    );
+    return;
+  }
   if (command === "export-patch") {
     const sandboxId = requiredArgument(args[0], "sandbox ID");
-    const outputPath = path3.resolve(requiredArgument(args[1], "patch output path"));
+    const outputPath = path4.resolve(requiredArgument(args[1], "patch output path"));
     const stageResult = await client.exec(sandboxId, ["git", "add", "--all"], {
       timeoutMs: 12e4
     });
@@ -1919,13 +2074,13 @@ async function main() {
   }
   if (command === "upload-issue-context") {
     const sandboxId = requiredArgument(args[0], "sandbox ID");
-    const inputPath = path3.resolve(requiredArgument(args[1], "issue context path"));
-    await client.writeFile(sandboxId, "/workspace/issue.json", await readFile2(inputPath, "utf8"));
+    const inputPath = path4.resolve(requiredArgument(args[1], "issue context path"));
+    await client.writeFile(sandboxId, "/workspace/issue.json", await readFile3(inputPath, "utf8"));
     return;
   }
   if (command === "upload-triage-context") {
     const sandboxId = requiredArgument(args[0], "sandbox ID");
-    const artifactDirectory = path3.resolve(requiredArgument(args[1], "triage artifact directory"));
+    const artifactDirectory = path4.resolve(requiredArgument(args[1], "triage artifact directory"));
     const files = [
       ["issue-context.json", "/workspace/issue.json"],
       ["triage-result.json", "/workspace/triage.json"],
@@ -1935,13 +2090,13 @@ async function main() {
       await client.writeFile(
         sandboxId,
         destinationPath,
-        await readFile2(path3.join(artifactDirectory, sourceName), "utf8")
+        await readFile3(path4.join(artifactDirectory, sourceName), "utf8")
       );
     }
     return;
   }
   if (command === "mcp-config") {
-    const serverPath = path3.resolve(requiredArgument(args[0], "MCP server path"));
+    const serverPath = path4.resolve(requiredArgument(args[0], "MCP server path"));
     const nodeBinPath = args[1];
     process.stdout.write(
       `${JSON.stringify({
@@ -1959,7 +2114,7 @@ async function main() {
     return;
   }
   throw new Error(
-    "Usage: sandbox-cli <create|destroy|hydrate-worktree|prepare-node|upload-issue-context|upload-triage-context|export-patch|mcp-config> [...args]"
+    "Usage: sandbox-cli <create|destroy|hydrate-worktree|prepare-node|install-dependencies|upload-issue-context|upload-triage-context|export-patch|mcp-config> [...args]"
   );
 }
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {

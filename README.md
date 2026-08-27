@@ -68,6 +68,21 @@ allows an MCP tool to run for roughly 28 hours, which is unsuitable for a CI job
 sandbox becomes unreachable. Bridge HTTP requests also stop shortly after their corresponding
 sandbox command deadline so cleanup cannot consume the rest of the job indefinitely.
 
+Before Claude starts, the fix action installs dependencies in a dedicated sandbox setup
+step. `dependency-install-command: auto` recognizes pnpm, npm, and Yarn lockfiles;
+`none` disables the step, and any other value is used as an explicit repository command.
+The install has its own 20-minute timeout and must leave the sandbox Git baseline clean.
+This keeps predictable package-manager latency out of the model's turn budget and makes
+installation failures visible as ordinary workflow setup failures.
+
+Cross-run dependency caching is intentionally not enabled yet. Cloudflare container disks
+are ephemeral after a sandbox sleeps or is destroyed, while this action destroys every
+sandbox to preserve run isolation. If cold dependency installation becomes material, the
+preferred next step is an R2-backed package-manager store scoped by repository identity,
+lockfile digest, Node and package-manager versions, and container image version. Restoring
+a complete `node_modules` tree is substantially larger and carries more cross-run state;
+reusing sandbox IDs would also weaken isolation and keep containers billable for longer.
+
 When a repository configures a disposable preview, keep a valid baseline project at that
 path and describe its provider and validation commands in `.github/claude-triage.yml`.
 The publisher accepts preview changes only alongside a real fix and only after the sandbox

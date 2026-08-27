@@ -44,6 +44,12 @@ inputs:
   node-version:
     description: Node.js semver range, or auto to use the repository's minimum supported version.
     default: auto
+  dependency-install-command:
+    description: Dependency install command, auto to detect a supported lockfile, or none to skip.
+    default: auto
+  dependency-install-timeout-ms:
+    description: Maximum time allowed for dependency installation before Claude starts.
+    default: '1200000'
   preview-directory:
     description: Repository-relative disposable preview project allowed in the patch.
     default: ''
@@ -218,9 +224,26 @@ runs:
         {
           echo "sandbox-id=$sandbox_id"
           echo "mcp-config=$mcp_config"
+          echo "node-bin=$node_bin"
           echo "node-version=$resolved_node_version"
         } >> "$GITHUB_OUTPUT"
         trap - ERR
+
+    - name: Install sandbox dependencies before starting Claude
+      shell: bash
+      env:
+        DEPENDENCY_INSTALL_COMMAND: ${{ inputs.dependency-install-command }}
+        DEPENDENCY_INSTALL_TIMEOUT_MS: ${{ inputs.dependency-install-timeout-ms }}
+        REPOSITORY_DIRECTORY: ${{ inputs.working-directory }}
+        SANDBOX_API_KEY: ${{ inputs.sandbox-api-key }}
+        SANDBOX_API_URL: ${{ inputs.sandbox-api-url }}
+      run: >-
+        node "$GITHUB_ACTION_PATH/../dist/sandbox-cli.mjs" install-dependencies
+        "${{ steps.setup.outputs.sandbox-id }}"
+        "$REPOSITORY_DIRECTORY"
+        "${{ steps.setup.outputs.node-bin }}"
+        "$DEPENDENCY_INSTALL_COMMAND"
+        "$DEPENDENCY_INSTALL_TIMEOUT_MS"
 
     - name: Attempt the triaged fix
       id: claude
@@ -261,6 +284,10 @@ runs:
           Each sandbox tool call has a hard ${{ inputs.mcp-tool-timeout-ms }}ms deadline. If a call
           times out, retry it at most once when a retry is safe, then return a structured incomplete
           result instead of waiting or retrying indefinitely.
+
+          Dependency installation was completed by a deterministic setup step before this session.
+          Do not reinstall dependencies unless you changed a package manifest or the installed state
+          is demonstrably unusable.
         claude_args: |
           --model ${{ inputs.model }}
           --mcp-config ${{ steps.setup.outputs.mcp-config }}

@@ -5,6 +5,7 @@ import { pathToFileURL } from 'node:url';
 import { createRepositoryArchive, readArchiveParts, type RepositoryArchive } from './archive.js';
 import { SandboxBridgeClient } from './bridge-client.js';
 import { loadBridgeEnvironment } from './config.js';
+import { installRepositoryDependencies } from './dependency-install.js';
 import { prepareNodeRuntime } from './node-runtime.js';
 
 const HYDRATE_ATTEMPTS = 3;
@@ -24,6 +25,14 @@ function requiredArgument(value: string | undefined, description: string): strin
     throw new Error(`Missing ${description}.`);
   }
   return value;
+}
+
+function positiveInteger(value: string | undefined, description: string): number {
+  const parsed = Number(value);
+  if (!Number.isSafeInteger(parsed) || parsed <= 0) {
+    throw new Error(`Invalid ${description}: ${JSON.stringify(value)}.`);
+  }
+  return parsed;
 }
 
 function parseSnapshotExclusions(value: string | undefined): string[] {
@@ -272,6 +281,23 @@ async function main(): Promise<void> {
     return;
   }
 
+  if (command === 'install-dependencies') {
+    const sandboxId = requiredArgument(args[0], 'sandbox ID');
+    const repositoryDirectory = path.resolve(requiredArgument(args[1], 'repository directory'));
+    const nodeBinPath = requiredArgument(args[2], 'Node.js binary path');
+    const requestedCommand = args[3] || 'auto';
+    const timeoutMs = positiveInteger(args[4] || '1200000', 'dependency install timeout');
+    await installRepositoryDependencies(
+      client,
+      sandboxId,
+      repositoryDirectory,
+      nodeBinPath,
+      requestedCommand,
+      timeoutMs,
+    );
+    return;
+  }
+
   if (command === 'export-patch') {
     const sandboxId = requiredArgument(args[0], 'sandbox ID');
     const outputPath = path.resolve(requiredArgument(args[1], 'patch output path'));
@@ -339,7 +365,7 @@ async function main(): Promise<void> {
   }
 
   throw new Error(
-    'Usage: sandbox-cli <create|destroy|hydrate-worktree|prepare-node|upload-issue-context|upload-triage-context|export-patch|mcp-config> [...args]',
+    'Usage: sandbox-cli <create|destroy|hydrate-worktree|prepare-node|install-dependencies|upload-issue-context|upload-triage-context|export-patch|mcp-config> [...args]',
   );
 }
 

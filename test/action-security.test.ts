@@ -129,6 +129,10 @@ describe('triage action isolation', () => {
     assert.match(fix, /^\s+MCP_TIMEOUT: \$\{\{ inputs\.mcp-startup-timeout-ms \}\}$/m);
     assert.match(fix, /^\s+MCP_TOOL_TIMEOUT: \$\{\{ inputs\.mcp-tool-timeout-ms \}\}$/m);
     assert.match(fix, /retry it at most once/);
+    assert.match(fix, /- name: Install sandbox dependencies before starting Claude/);
+    assert.match(fix, /install-dependencies/);
+    assert.match(fix, /Dependency installation was completed by a deterministic setup step/);
+    assert.match(fix, /^\s+dependency-install-timeout-ms:$/m);
     assert.doesNotMatch(fix, /permission-issues: write/);
   });
 

@@ -44,4 +44,15 @@ describe('triage action isolation', () => {
     assert.doesNotMatch(publisher, /anthropic/i);
     assert.doesNotMatch(publisher, /SANDBOX_API_KEY/);
   });
+
+  it('publishes only validated previews alongside a real fix', async () => {
+    const publisher = await readFile(publisherPath, 'utf8');
+
+    assert.match(publisher, /Refusing a preview-only patch without a repository fix/);
+    assert.match(publisher, /result\.previewReady === true/);
+    assert.match(publisher, /Dropping preview changes because sandbox validation did not succeed/);
+    assert.match(publisher, /git restore --staged -- "\$PREVIEW_DIRECTORY"/);
+    assert.match(publisher, /docs: add triage preview for issue/);
+    assert.match(publisher, /labels\.push\('claude-triage-preview'\)/);
+  });
 });

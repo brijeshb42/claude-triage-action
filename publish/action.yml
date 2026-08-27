@@ -17,11 +17,17 @@ inputs:
   working-directory:
     description: Checked-out repository where the patch is validated and committed.
     default: .
+  preview-directory:
+    description: Repository-relative disposable preview directory allowed in a second commit.
+    default: ''
 
 outputs:
   pr-url:
     description: URL of the draft pull request, when a patch was accepted.
     value: ${{ steps.pr.outputs.url }}
+  pr-number:
+    description: Number of the draft pull request, when a patch was accepted.
+    value: ${{ steps.pr.outputs.number }}
 
 runs:
   using: composite
@@ -43,8 +49,17 @@ runs:
       working-directory: ${{ inputs.working-directory }}
       env:
         PATCH_PATH: ${{ runner.temp }}/claude-triage/claude-triage.patch
+        PREVIEW_DIRECTORY: ${{ inputs.preview-directory }}
+        RESULT_PATH: ${{ runner.temp }}/claude-triage/claude-triage-result.json
       run: |
         set -euo pipefail
+        case "$PREVIEW_DIRECTORY" in
+          '') ;;
+          .|/*|..|../*|*/..|*/../*)
+            echo "Invalid preview directory: $PREVIEW_DIRECTORY" >&2
+            exit 1
+            ;;
+        esac
         test "$(wc -c < "$PATCH_PATH")" -le 8388608
         if [ ! -s "$PATCH_PATH" ]; then
           echo "has-changes=false" >> "$GITHUB_OUTPUT"
@@ -56,6 +71,8 @@ runs:
 
         changed_count="$(git diff --cached --name-only | wc -l | tr -d ' ')"
         test "$changed_count" -le 100
+        preview_changed=false
+        fix_changed=false
         while IFS= read -r -d '' changed_path; do
           case "$changed_path" in
             .github/*|.gitmodules|.gitattributes)
@@ -63,13 +80,40 @@ runs:
               exit 1
               ;;
           esac
+          if [ -n "$PREVIEW_DIRECTORY" ] && { [ "$changed_path" = "$PREVIEW_DIRECTORY" ] || [[ "$changed_path" = "$PREVIEW_DIRECTORY/"* ]]; }; then
+            preview_changed=true
+          else
+            fix_changed=true
+          fi
         done < <(git diff --cached --name-only -z)
 
         if git diff --cached --summary | grep -q 'mode 120000'; then
           echo 'Refusing agent-created or modified symbolic links.' >&2
           exit 1
         fi
-        echo "has-changes=true" >> "$GITHUB_OUTPUT"
+        if [ "$fix_changed" != true ]; then
+          echo 'Refusing a preview-only patch without a repository fix.' >&2
+          exit 1
+        fi
+
+        preview_reported_ready="$(node --input-type=module - "$RESULT_PATH" <<'NODE'
+        import { readFileSync } from 'node:fs';
+        const result = JSON.parse(readFileSync(process.argv[2], 'utf8'));
+        process.stdout.write(result.previewReady === true ? 'true' : 'false');
+        NODE
+        )"
+        preview_ready=false
+        if [ "$preview_changed" = true ] && [ "$preview_reported_ready" = true ]; then
+          preview_ready=true
+        elif [ "$preview_changed" = true ]; then
+          echo 'Dropping preview changes because sandbox validation did not succeed.' >&2
+          git restore --source=HEAD --staged --worktree -- "$PREVIEW_DIRECTORY"
+        fi
+
+        {
+          echo "has-changes=true"
+          echo "preview-ready=$preview_ready"
+        } >> "$GITHUB_OUTPUT"
 
     - name: Prepare pull request metadata
       id: metadata
@@ -78,6 +122,7 @@ runs:
       env:
         ISSUE_NUMBER: ${{ inputs.issue-number }}
         RESULT_PATH: ${{ runner.temp }}/claude-triage/claude-triage-result.json
+        PREVIEW_READY: ${{ steps.patch.outputs.preview-ready }}
       run: |
         node --input-type=module <<'NODE'
         import { appendFileSync, readFileSync, writeFileSync } from 'node:fs';
@@ -89,6 +134,9 @@ runs:
           String(result.prBody || result.summary || 'Automated triage fix.'),
           '',
           `Closes #${process.env.ISSUE_NUMBER}`,
+          '',
+          `<!-- claude-triage-issue:${process.env.ISSUE_NUMBER} -->`,
+          `<!-- claude-triage-preview:${process.env.PREVIEW_READY === 'true' ? 'pending' : 'none'} -->`,
           '',
           '> Draft created by the Cloudflare-sandboxed triage prototype. Review before merging.',
         ].join('\n');
@@ -105,13 +153,22 @@ runs:
       env:
         ISSUE_NUMBER: ${{ inputs.issue-number }}
         PR_TITLE: ${{ steps.metadata.outputs.title }}
+        PREVIEW_DIRECTORY: ${{ inputs.preview-directory }}
+        PREVIEW_READY: ${{ steps.patch.outputs.preview-ready }}
       run: |
         set -euo pipefail
         branch="claude/triage-${ISSUE_NUMBER}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
         git config user.name 'github-actions[bot]'
         git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
         git switch -c "$branch"
+        if [ "$PREVIEW_READY" = true ]; then
+          git restore --staged -- "$PREVIEW_DIRECTORY"
+        fi
         git -c core.hooksPath=/dev/null commit -m "$PR_TITLE"
+        if [ "$PREVIEW_READY" = true ]; then
+          git add --all -- "$PREVIEW_DIRECTORY"
+          git -c core.hooksPath=/dev/null commit -m "docs: add triage preview for issue #${ISSUE_NUMBER}"
+        fi
         git push origin "$branch"
         echo "name=$branch" >> "$GITHUB_OUTPUT"
 
@@ -123,6 +180,7 @@ runs:
         BASE_BRANCH: ${{ inputs.default-branch }}
         HEAD_BRANCH: ${{ steps.branch.outputs.name }}
         METADATA_PATH: ${{ steps.metadata.outputs.metadata-path }}
+        PREVIEW_READY: ${{ steps.patch.outputs.preview-ready }}
       with:
         github-token: ${{ inputs.github-token }}
         script: |
@@ -137,7 +195,34 @@ runs:
             body: metadata.body,
             draft: true,
           });
+          const labels = ['claude-triage'];
+          if (process.env.PREVIEW_READY === 'true') {
+            labels.push('claude-triage-preview');
+          }
+          for (const name of labels) {
+            try {
+              await github.rest.issues.getLabel({ owner: context.repo.owner, repo: context.repo.repo, name });
+            } catch (error) {
+              if (error.status !== 404) throw error;
+              await github.rest.issues.createLabel({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                name,
+                color: name === 'claude-triage-preview' ? '1d76db' : '5319e7',
+                description: name === 'claude-triage-preview'
+                  ? 'A validated disposable StackBlitz preview is ready to publish'
+                  : 'Draft fix created by automated issue triage',
+              });
+            }
+          }
+          await github.rest.issues.addLabels({
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            issue_number: pullRequest.number,
+            labels,
+          });
           core.setOutput('url', pullRequest.html_url);
+          core.setOutput('number', String(pullRequest.number));
 
     - name: Publish triage result
       if: always()
@@ -147,6 +232,7 @@ runs:
         RESULT_PATH: ${{ runner.temp }}/claude-triage/claude-triage-result.json
         PATCH_OUTCOME: ${{ steps.patch.outcome }}
         PR_URL: ${{ steps.pr.outputs.url }}
+        PREVIEW_READY: ${{ steps.patch.outputs.preview-ready }}
       with:
         github-token: ${{ inputs.github-token }}
         script: |
@@ -168,6 +254,9 @@ runs:
             : process.env.PATCH_OUTCOME === 'failure'
               ? '**Draft fix:** A patch was produced but rejected by the publisher safety checks.'
               : '**Draft fix:** No code change was produced.';
+          const previewLine = process.env.PREVIEW_READY === 'true' && process.env.PR_URL
+            ? '**StackBlitz preview:** Publication is pending in the pull request CI.'
+            : '**StackBlitz preview:** Not produced for this run.';
           const body = [
             marker,
             '## Claude triage',
@@ -179,6 +268,9 @@ runs:
             `**Validation:** ${result.validation}`,
             '',
             prLine,
+            '',
+            '<!-- claude-triage-preview-status -->',
+            previewLine,
           ].join('\n');
           const issue_number = Number(process.env.ISSUE_NUMBER);
           const { data: comments } = await github.rest.issues.listComments({

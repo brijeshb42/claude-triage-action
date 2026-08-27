@@ -35,6 +35,9 @@ inputs:
   node-version:
     description: Node.js semver range, or auto to use the repository's minimum supported version.
     default: auto
+  preview-directory:
+    description: Repository-relative disposable preview project that Claude may modify after validating a fix.
+    default: ''
   model:
     description: Claude model passed to Claude Code.
     default: claude-sonnet-4-6
@@ -166,8 +169,13 @@ runs:
           Anthropic credentials.
 
           Investigate a probable cause, implement the smallest defensible fix when one
-          is clear, and run focused validation. Do not publish to GitHub. Return the
-          required structured result even when no safe fix can be produced.
+          is clear, and run focused validation. If the fix succeeds and
+          `${{ inputs.preview-directory }}` is non-empty, follow the repository's trusted
+          `.github/claude-triage.yml` configuration to create a focused reproduction in
+          that directory. Preview-driven changes must remain inside that directory. Make
+          one initial preview attempt and at most one repair attempt, and remove incomplete
+          preview changes if validation still fails. Do not publish to GitHub. Return the
+          required structured result even when no safe fix or preview can be produced.
         claude_args: |
           --model ${{ inputs.model }}
           --mcp-config ${{ steps.setup.outputs.mcp-config }}
@@ -176,7 +184,7 @@ runs:
           --tools "Skill"
           --permission-mode dontAsk
           --allowedTools "Skill(mui-triage-ci),mcp__sandbox__read_issue_context,mcp__sandbox__read_file,mcp__sandbox__write_file,mcp__sandbox__list_files,mcp__sandbox__search,mcp__sandbox__exec,mcp__sandbox__apply_patch,mcp__sandbox__git_diff,mcp__sandbox__git_status"
-          --json-schema '{"type":"object","additionalProperties":false,"required":["summary","probableCause","confidence","fixAttempted","fixComplete","prTitle","prBody","validation"],"properties":{"summary":{"type":"string"},"probableCause":{"type":"string"},"confidence":{"type":"string","enum":["low","medium","high"]},"fixAttempted":{"type":"boolean"},"fixComplete":{"type":"boolean"},"prTitle":{"type":"string"},"prBody":{"type":"string"},"validation":{"type":"string"}}}'
+          --json-schema '{"type":"object","additionalProperties":false,"required":["summary","probableCause","confidence","fixAttempted","fixComplete","prTitle","prBody","validation","previewAttempted","previewReady","previewValidation"],"properties":{"summary":{"type":"string"},"probableCause":{"type":"string"},"confidence":{"type":"string","enum":["low","medium","high"]},"fixAttempted":{"type":"boolean"},"fixComplete":{"type":"boolean"},"prTitle":{"type":"string"},"prBody":{"type":"string"},"validation":{"type":"string"},"previewAttempted":{"type":"boolean"},"previewReady":{"type":"boolean"},"previewValidation":{"type":"string"}}}'
           --max-turns ${{ inputs.max-turns }}
 
     - name: Save agent result
@@ -197,6 +205,9 @@ runs:
           prTitle: '',
           prBody: '',
           validation: 'No validation result was returned.',
+          previewAttempted: false,
+          previewReady: false,
+          previewValidation: 'No preview validation result was returned.',
         };
         let result = fallback;
         if (process.env.RESULT_JSON) {

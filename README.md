@@ -62,6 +62,7 @@ jobs:
           github-token: ${{ github.token }}
           issue-number: ${{ github.event.issue.number }}
           artifact-name: claude-triage-${{ github.event.issue.number }}-${{ github.run_id }}
+          preview-directory: examples/triage-preview
 
   publish:
     needs: agent
@@ -80,10 +81,17 @@ jobs:
           github-token: ${{ github.token }}
           issue-number: ${{ github.event.issue.number }}
           default-branch: ${{ github.event.repository.default_branch }}
+          preview-directory: examples/triage-preview
 ```
 
 An acknowledgement reaction can be a third, short repository-owned job with only
 `issues: write`. Keeping it outside the agent job preserves the read-only model boundary.
+
+When a repository configures a disposable preview, keep a valid baseline project at that
+path and describe its provider and validation commands in `.github/claude-triage.yml`.
+The publisher accepts preview changes only alongside a real fix and only after the sandbox
+reports successful validation. It puts the preview in a separate commit and adds the
+`claude-triage-preview` label so repository-owned `pkg.pr.new` CI can publish and report it.
 
 ## Development
 

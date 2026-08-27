@@ -31,9 +31,17 @@ credentials.
 5. Run focused validation in the sandbox. Follow repository instructions. Do not claim a
    command passed unless its exit code is zero. If dependencies are missing, you may run
    the repository's documented install command inside the sandbox; never add credentials.
-6. Inspect `mcp__sandbox__git_diff` and `mcp__sandbox__git_status`. Remove scratch files.
-   Leave only the proposed fix and its tests in the worktree.
-7. Return the workflow's required structured result. `prTitle` should be a conventional,
+6. After the fix passes focused validation, inspect the trusted repository-owned
+   `.github/claude-triage.yml`. If it configures a preview directory, construct a concise
+   demonstration of the reported behavior there. Preview-driven dependency, script, and
+   source changes may touch anything inside that directory but nothing outside it. Do not
+   treat an unchanged baseline playground as a preview. Run the configured preview
+   validation, make at most one repair attempt, and restore incomplete preview edits if it
+   still fails.
+7. Inspect `mcp__sandbox__git_diff` and `mcp__sandbox__git_status`. Remove scratch files.
+   Leave only the proposed fix, its tests, and a successfully validated preview in the
+   worktree.
+8. Return the workflow's required structured result. `prTitle` should be a conventional,
    concise title. `prBody` should explain the behavior, cause, fix, and validation without
    volatile line numbers. If no safe fix is possible, leave `prTitle` and `prBody` empty
    and clearly explain why.
@@ -41,6 +49,9 @@ credentials.
 ## Quality bar
 
 - Prefer evidence from a failing regression test that passes after the fix.
+- Set `previewReady` only when the configured preview directory changed and every configured
+  preview validation command exited successfully. Describe exact commands and outcomes in
+  `previewValidation`.
 - Keep visible claims time-stable: public package/component/API names and behavior.
 - Put uncertain theories in `probableCause` and choose `low` or `medium` confidence.
 - Never mutate GitHub. The separate publisher job decides whether the patch is safe to

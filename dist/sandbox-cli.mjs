@@ -1195,7 +1195,7 @@ import { tmpdir } from "node:os";
 import * as path from "node:path";
 import { promisify } from "node:util";
 var execFileAsync = promisify(execFile);
-var TARGET_CHUNK_BYTES = 20 * 1024 * 1024;
+var TARGET_CHUNK_BYTES = 8 * 1024 * 1024;
 var MAX_ARCHIVE_BYTES = 32 * 1024 * 1024;
 function estimatedTarBytes(file) {
   const contentBlocks = Math.ceil(file.size / 512) * 512;
@@ -1248,7 +1248,7 @@ async function createTar(archiveSourceDirectory, destination, files) {
   await new Promise((resolve2, reject) => {
     const tarProcess = spawn(
       "tar",
-      ["--null", "--no-recursion", "--create", "--file", destination, "--files-from=-"],
+      ["--gzip", "--null", "--no-recursion", "--create", "--file", destination, "--files-from=-"],
       { cwd: archiveSourceDirectory, stdio: ["pipe", "inherit", "inherit"] }
     );
     tarProcess.once("error", reject);
@@ -1270,7 +1270,7 @@ async function createArchiveChunks(repositoryDirectory) {
     await symlink(repositoryDirectory, path.join(temporaryDirectory, "repo"), "dir");
     const chunks = [];
     for (const [index, plannedFiles] of plans.entries()) {
-      const archivePath = path.join(temporaryDirectory, `chunk-${index}.tar`);
+      const archivePath = path.join(temporaryDirectory, `chunk-${index}.tar.gz`);
       await createTar(temporaryDirectory, archivePath, plannedFiles);
       const archiveStats = await stat(archivePath);
       if (archiveStats.size > MAX_ARCHIVE_BYTES) {
@@ -1642,6 +1642,12 @@ async function prepareNodeRuntime(client, sandboxId, repositoryDirectory, reques
 }
 
 // src/sandbox-cli.ts
+var HYDRATE_ATTEMPTS = 3;
+async function delay(milliseconds) {
+  await new Promise((resolve2) => {
+    setTimeout(resolve2, milliseconds);
+  });
+}
 function requiredArgument(value, description) {
   if (!value) {
     throw new Error(`Missing ${description}.`);
@@ -1683,13 +1689,28 @@ async function main() {
     const repositoryDirectory = path3.resolve(requiredArgument(args[1], "repository directory"));
     const chunks = await createArchiveChunks(repositoryDirectory);
     let uploadedFiles = 0;
-    for (const [index, chunk] of chunks.entries()) {
-      await client.hydrate(sandboxId, chunk.bytes);
-      uploadedFiles += chunk.fileCount;
-      process.stderr.write(
-        `Hydrated chunk ${index + 1}/${chunks.length} (${chunk.fileCount} tracked files).
+    for (let attempt = 1; attempt <= HYDRATE_ATTEMPTS; attempt += 1) {
+      uploadedFiles = 0;
+      try {
+        for (const [index, chunk] of chunks.entries()) {
+          await client.hydrate(sandboxId, chunk.bytes);
+          uploadedFiles += chunk.fileCount;
+          process.stderr.write(
+            `Hydrated chunk ${index + 1}/${chunks.length} (${chunk.fileCount} tracked files).
 `
-      );
+          );
+        }
+        break;
+      } catch (error) {
+        if (attempt === HYDRATE_ATTEMPTS) {
+          throw error;
+        }
+        process.stderr.write(
+          `Hydration attempt ${attempt}/${HYDRATE_ATTEMPTS} failed; restarting all chunks.
+`
+        );
+        await delay(1e3 * 2 ** (attempt - 1));
+      }
     }
     await initializeRepository(client, sandboxId);
     process.stderr.write(

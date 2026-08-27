@@ -5,7 +5,10 @@ import * as path from 'node:path';
 import { promisify } from 'node:util';
 
 const execFileAsync = promisify(execFile);
-const TARGET_CHUNK_BYTES = 20 * 1024 * 1024;
+// The Bridge accepts 32 MiB requests, but it base64-encodes hydrate payloads before
+// forwarding them to the container. Keep the uncompressed plan substantially below
+// that ceiling to limit Worker and RPC memory pressure for large repositories.
+const TARGET_CHUNK_BYTES = 8 * 1024 * 1024;
 const MAX_ARCHIVE_BYTES = 32 * 1024 * 1024;
 
 export interface TrackedFile {
@@ -83,7 +86,7 @@ async function createTar(
   await new Promise<void>((resolve, reject) => {
     const tarProcess = spawn(
       'tar',
-      ['--null', '--no-recursion', '--create', '--file', destination, '--files-from=-'],
+      ['--gzip', '--null', '--no-recursion', '--create', '--file', destination, '--files-from=-'],
       { cwd: archiveSourceDirectory, stdio: ['pipe', 'inherit', 'inherit'] },
     );
     tarProcess.once('error', reject);
@@ -112,7 +115,7 @@ export async function createArchiveChunks(repositoryDirectory: string): Promise<
     await symlink(repositoryDirectory, path.join(temporaryDirectory, 'repo'), 'dir');
     const chunks: ArchiveChunk[] = [];
     for (const [index, plannedFiles] of plans.entries()) {
-      const archivePath = path.join(temporaryDirectory, `chunk-${index}.tar`);
+      const archivePath = path.join(temporaryDirectory, `chunk-${index}.tar.gz`);
       await createTar(temporaryDirectory, archivePath, plannedFiles);
       const archiveStats = await stat(archivePath);
       if (archiveStats.size > MAX_ARCHIVE_BYTES) {

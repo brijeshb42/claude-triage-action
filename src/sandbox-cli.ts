@@ -6,6 +6,14 @@ import { SandboxBridgeClient } from './bridge-client.js';
 import { loadBridgeEnvironment } from './config.js';
 import { prepareNodeRuntime } from './node-runtime.js';
 
+const HYDRATE_ATTEMPTS = 3;
+
+async function delay(milliseconds: number): Promise<void> {
+  await new Promise((resolve) => {
+    setTimeout(resolve, milliseconds);
+  });
+}
+
 function requiredArgument(value: string | undefined, description: string): string {
   if (!value) {
     throw new Error(`Missing ${description}.`);
@@ -53,12 +61,26 @@ async function main(): Promise<void> {
     const chunks = await createArchiveChunks(repositoryDirectory);
     let uploadedFiles = 0;
 
-    for (const [index, chunk] of chunks.entries()) {
-      await client.hydrate(sandboxId, chunk.bytes);
-      uploadedFiles += chunk.fileCount;
-      process.stderr.write(
-        `Hydrated chunk ${index + 1}/${chunks.length} (${chunk.fileCount} tracked files).\n`,
-      );
+    for (let attempt = 1; attempt <= HYDRATE_ATTEMPTS; attempt += 1) {
+      uploadedFiles = 0;
+      try {
+        for (const [index, chunk] of chunks.entries()) {
+          await client.hydrate(sandboxId, chunk.bytes);
+          uploadedFiles += chunk.fileCount;
+          process.stderr.write(
+            `Hydrated chunk ${index + 1}/${chunks.length} (${chunk.fileCount} tracked files).\n`,
+          );
+        }
+        break;
+      } catch (error) {
+        if (attempt === HYDRATE_ATTEMPTS) {
+          throw error;
+        }
+        process.stderr.write(
+          `Hydration attempt ${attempt}/${HYDRATE_ATTEMPTS} failed; restarting all chunks.\n`,
+        );
+        await delay(1_000 * 2 ** (attempt - 1));
+      }
     }
 
     await initializeRepository(client, sandboxId);

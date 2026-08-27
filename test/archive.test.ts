@@ -44,10 +44,28 @@ describe('createArchiveChunks', () => {
       assert.equal(chunk.fileCount, 1);
       assert.ok(chunk.bytes.length > 0);
 
-      const archivePath = path.join(repositoryDirectory, 'archive.tar');
+      const archivePath = path.join(repositoryDirectory, 'archive.tar.gz');
       await writeFile(archivePath, chunk.bytes);
       const { stdout } = await execFileAsync('tar', ['--list', '--file', archivePath]);
       assert.equal(stdout.trim(), 'repo/src/file with spaces.ts');
+    } finally {
+      await rm(repositoryDirectory, { recursive: true, force: true });
+    }
+  });
+
+  it('compresses repetitive repository content before uploading it', async () => {
+    const repositoryDirectory = await mkdtemp(path.join(tmpdir(), 'claude-triage-repository-'));
+
+    try {
+      const content = 'export const value = 42;\n'.repeat(50_000);
+      await writeFile(path.join(repositoryDirectory, 'large.ts'), content);
+      await execFileAsync('git', ['init'], { cwd: repositoryDirectory });
+      await execFileAsync('git', ['add', '.'], { cwd: repositoryDirectory });
+
+      const [chunk] = await createArchiveChunks(repositoryDirectory);
+
+      assert.ok(chunk);
+      assert.ok(chunk.bytes.length < Buffer.byteLength(content) / 10);
     } finally {
       await rm(repositoryDirectory, { recursive: true, force: true });
     }

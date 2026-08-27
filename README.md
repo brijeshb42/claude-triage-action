@@ -1,14 +1,18 @@
 # Claude triage action lab
 
-Personal prototype for running Claude Code in GitHub Actions while all repository
-commands and file mutations happen in an isolated Cloudflare Sandbox.
+Personal prototype for separating read-only issue analysis on GitHub Actions from
+credential-free fix execution inside an isolated Cloudflare Sandbox.
 
-The repository contains three pieces:
+The repository contains these reusable pieces:
 
-- `action.yml`, `dist/`, and `plugin/`: the composite triage action, its sandbox MCP server,
-  and the non-interactive triage skill.
+- `triage/action.yml`: read-only analysis that creates a versioned, 30-day triage artifact.
+- `fix/action.yml`: validates the newest eligible triage artifact, checks out its exact commit,
+  and attempts the fix through the Sandbox MCP.
 - `publish/action.yml`: a separate composite publisher that validates the untrusted patch
-  before creating a draft pull request or issue comment.
+  before creating a draft pull request and superseding an older bot-owned draft.
+- `report/action.yml`: a model-free issue reporter for triage-only and in-progress outcomes.
+- `action.yml`: the temporary compatibility action for the original combined flow.
+- `dist/` and `plugin/`: bundled helpers and the read-only/fix CI skills.
 - `bridge/`: a lightly customized deployment of Cloudflare's supported Sandbox Bridge.
 
 Claude Code and Anthropic federation remain on the GitHub-hosted runner. The sandbox
@@ -19,81 +23,35 @@ Large tracked snapshots are compressed as one `tar.gz`, streamed to the Bridge a
 sandbox. Each failed part is retried independently, and extraction retries reuse the uploaded
 parts.
 
-Claude can use only the trusted `mui-triage-ci` skill and the explicitly listed `sandbox`
-MCP tools. Unlisted tool calls are denied, and native filesystem, shell, web, task,
-worktree, messaging, and scheduling tools are removed from its context. All repository
-access and execution crosses the authenticated Sandbox Bridge.
+The triage model can use only the read-only skill and Claude's read, glob, and grep tools.
+It cannot execute or modify the checkout. The fix model can use only the fix skill and the
+explicit Sandbox MCP tools. Unlisted native filesystem, shell, web, task, worktree,
+messaging, and scheduling tools are removed from the fix context.
 
 ## Workflow setup
 
-The repository using the action owns its workflow trigger, runner labels, timeouts, and
-job permissions. The model and publisher remain separate jobs so the model never receives
-a write-enabled GitHub token. Both jobs can select any runner that supports composite
-JavaScript actions and Bash.
+The consuming repository owns command parsing, runner labels, timeouts, permissions, and
+concurrency. A typical flow is:
 
-```yaml
-name: Claude issue triage
+```text
+@claude triage
+      └─ read-only triage artifact
+            ├─ non-actionable → trusted issue report
+            └─ actionable → sandboxed fix artifact → trusted draft PR publisher
 
-on:
-  issue_comment:
-    types: [created]
-
-permissions: {}
-
-jobs:
-  agent:
-    if: >-
-      github.event.issue.pull_request == null &&
-      contains(github.event.comment.body, '@claude triage') &&
-      contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association)
-    runs-on: ubuntu-24.04 # Selected by the repository using the action.
-    timeout-minutes: 45
-    permissions:
-      contents: read
-      id-token: write
-      issues: read
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - uses: brijeshb42/claude-triage-action@<full-commit-sha>
-        with:
-          sandbox-api-url: ${{ vars.SANDBOX_API_URL }}
-          sandbox-api-key: ${{ secrets.SANDBOX_API_KEY }}
-          anthropic-federation-rule-id: ${{ vars.ANTHROPIC_FEDERATION_RULE_ID }}
-          anthropic-organization-id: ${{ vars.ANTHROPIC_ORGANIZATION_ID }}
-          anthropic-service-account-id: ${{ vars.ANTHROPIC_SERVICE_ACCOUNT_ID }}
-          anthropic-workspace-id: ${{ vars.ANTHROPIC_WORKSPACE_ID }}
-          github-token: ${{ github.token }}
-          issue-number: ${{ github.event.issue.number }}
-          artifact-name: claude-triage-${{ github.event.issue.number }}-${{ github.run_id }}
-          preview-directory: examples/triage-preview
-          snapshot-excludes: |
-            docs/public
-            coverage/**
-
-  publish:
-    needs: agent
-    if: always() && needs.agent.result != 'skipped'
-    runs-on: ubuntu-24.04 # May differ from the agent runner.
-    timeout-minutes: 10
-    permissions:
-      contents: write
-      issues: write
-      pull-requests: write
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: brijeshb42/claude-triage-action/publish@<full-commit-sha>
-        with:
-          artifact-name: claude-triage-${{ github.event.issue.number }}-${{ github.run_id }}
-          github-token: ${{ github.token }}
-          issue-number: ${{ github.event.issue.number }}
-          default-branch: ${{ github.event.repository.default_branch }}
-          preview-directory: examples/triage-preview
+@claude fix
+      └─ newest eligible triage artifact → sandboxed fix → trusted publisher
 ```
 
-An acknowledgement reaction can be a third, short repository-owned job with only
-`issues: write`. Keeping it outside the agent job preserves the read-only model boundary.
+Triage artifacts are eligible for 14 days and retained for 30. They bind the repository ID,
+issue, workflow, run, default branch, exact base SHA, schema, and expiry. An explicit fix can
+override the model's disposition, but never those identity or freshness checks. The fix uses
+the immutable issue snapshot saved by triage and does not reload later issue comments.
+
+The three model/publication stages use separate jobs so neither Claude invocation receives a
+write-enabled GitHub token. See the `brijeshb42/material-ui` prototype workflow for the full
+command parser, automatic handoff, latest-artifact replay, reporter, GitHub App publisher, and
+per-issue concurrency setup.
 
 `snapshot-excludes` accepts newline-separated, repository-relative Git pathspecs. Plain
 directory paths exclude their contents, and wildcard patterns can omit generated or bulky

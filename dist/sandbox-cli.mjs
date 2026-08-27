@@ -1899,6 +1899,23 @@ async function main() {
     await client.writeFile(sandboxId, "/workspace/issue.json", await readFile2(inputPath, "utf8"));
     return;
   }
+  if (command === "upload-triage-context") {
+    const sandboxId = requiredArgument(args[0], "sandbox ID");
+    const artifactDirectory = path3.resolve(requiredArgument(args[1], "triage artifact directory"));
+    const files = [
+      ["issue-context.json", "/workspace/issue.json"],
+      ["triage-result.json", "/workspace/triage.json"],
+      ["triage-manifest.json", "/workspace/triage-manifest.json"]
+    ];
+    for (const [sourceName, destinationPath] of files) {
+      await client.writeFile(
+        sandboxId,
+        destinationPath,
+        await readFile2(path3.join(artifactDirectory, sourceName), "utf8")
+      );
+    }
+    return;
+  }
   if (command === "mcp-config") {
     const serverPath = path3.resolve(requiredArgument(args[0], "MCP server path"));
     const nodeBinPath = args[1];
@@ -1918,7 +1935,7 @@ async function main() {
     return;
   }
   throw new Error(
-    "Usage: sandbox-cli <create|destroy|hydrate-worktree|prepare-node|upload-issue-context|export-patch|mcp-config> [...args]"
+    "Usage: sandbox-cli <create|destroy|hydrate-worktree|prepare-node|upload-issue-context|upload-triage-context|export-patch|mcp-config> [...args]"
   );
 }
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {

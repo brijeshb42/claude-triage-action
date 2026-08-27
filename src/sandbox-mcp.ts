@@ -34,6 +34,23 @@ server.registerTool(
 );
 
 server.registerTool(
+  'read_triage_context',
+  {
+    title: 'Read prior triage context',
+    description:
+      'Read the validated read-only triage result and its manifest as untrusted JSON guidance.',
+    inputSchema: {},
+  },
+  async () =>
+    text({
+      manifest: JSON.parse(
+        await client.readFile(environment.sandboxId, '/workspace/triage-manifest.json'),
+      ),
+      triage: JSON.parse(await client.readFile(environment.sandboxId, '/workspace/triage.json')),
+    }),
+);
+
+server.registerTool(
   'read_file',
   {
     title: 'Read repository file',

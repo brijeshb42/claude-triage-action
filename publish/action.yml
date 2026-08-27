@@ -179,6 +179,7 @@ runs:
       env:
         BASE_BRANCH: ${{ inputs.default-branch }}
         HEAD_BRANCH: ${{ steps.branch.outputs.name }}
+        ISSUE_NUMBER: ${{ inputs.issue-number }}
         METADATA_PATH: ${{ steps.metadata.outputs.metadata-path }}
         PREVIEW_READY: ${{ steps.patch.outputs.preview-ready }}
       with:
@@ -221,6 +222,35 @@ runs:
             issue_number: pullRequest.number,
             labels,
           });
+          const issueMarker = `<!-- claude-triage-issue:${process.env.ISSUE_NUMBER} -->`;
+          const previousPullRequests = await github.paginate(github.rest.pulls.list, {
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            state: 'open',
+            per_page: 100,
+          });
+          for (const previous of previousPullRequests) {
+            const isOwnedTriagePullRequest =
+              previous.number !== pullRequest.number &&
+              previous.body?.includes(issueMarker) &&
+              previous.head.repo?.full_name === `${context.repo.owner}/${context.repo.repo}` &&
+              previous.head.ref.startsWith(`claude/triage-${process.env.ISSUE_NUMBER}-`);
+            if (!isOwnedTriagePullRequest) {
+              continue;
+            }
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: previous.number,
+              body: `Superseded by #${pullRequest.number}.`,
+            });
+            await github.rest.pulls.update({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: previous.number,
+              state: 'closed',
+            });
+          }
           core.setOutput('url', pullRequest.html_url);
           core.setOutput('number', String(pullRequest.number));
 

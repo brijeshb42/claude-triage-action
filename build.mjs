@@ -25,4 +25,14 @@ await Promise.all([
     entryPoints: ['src/save-agent-result.ts'],
     outfile: 'dist/save-agent-result.mjs',
   }),
+  build({
+    ...shared,
+    entryPoints: ['src/save-triage-artifact.ts'],
+    outfile: 'dist/save-triage-artifact.mjs',
+  }),
+  build({
+    ...shared,
+    entryPoints: ['src/validate-triage-artifact.ts'],
+    outfile: 'dist/validate-triage-artifact.mjs',
+  }),
 ]);

@@ -3,7 +3,10 @@ import { readFile } from 'node:fs/promises';
 import { describe, it } from 'node:test';
 
 const actionPath = new URL('../action.yml', import.meta.url);
+const fixActionPath = new URL('../fix/action.yml', import.meta.url);
 const publisherPath = new URL('../publish/action.yml', import.meta.url);
+const reporterPath = new URL('../report/action.yml', import.meta.url);
+const triageActionPath = new URL('../triage/action.yml', import.meta.url);
 
 describe('triage action isolation', () => {
   it('is a runner-agnostic composite action', async () => {
@@ -61,6 +64,37 @@ describe('triage action isolation', () => {
     assert.doesNotMatch(publisher, /SANDBOX_API_KEY/);
   });
 
+  it('keeps read-only triage on the runner without command or mutation tools', async () => {
+    const triage = await readFile(triageActionPath, 'utf8');
+
+    assert.match(triage, /^runs:\n  using: composite$/m);
+    assert.match(triage, /--tools "Skill,Read,Glob,Grep"/);
+    assert.match(triage, /--permission-mode plan/);
+    assert.doesNotMatch(triage, /SANDBOX_API_KEY/);
+    assert.doesNotMatch(triage, /permission-issues: write/);
+    assert.match(triage, /retention-days: 30/);
+  });
+
+  it('gives only the fix stage access to sandbox mutation tools', async () => {
+    const fix = await readFile(fixActionPath, 'utf8');
+
+    assert.match(fix, /Skill\(mui-fix-ci\)/);
+    assert.match(fix, /mcp__sandbox__read_triage_context/);
+    assert.match(fix, /mcp__sandbox__apply_patch/);
+    assert.match(fix, /validate-triage-artifact\.mjs/);
+    assert.match(fix, /persist-credentials: false/);
+    assert.doesNotMatch(fix, /permission-issues: write/);
+  });
+
+  it('keeps issue mutation in a model-free reporter', async () => {
+    const reporter = await readFile(reporterPath, 'utf8');
+
+    assert.match(reporter, /^runs:\n  using: composite$/m);
+    assert.match(reporter, /validate-triage-artifact\.mjs/);
+    assert.doesNotMatch(reporter, /anthropic/i);
+    assert.doesNotMatch(reporter, /SANDBOX_API_KEY/);
+  });
+
   it('publishes only validated previews alongside a real fix', async () => {
     const publisher = await readFile(publisherPath, 'utf8');
 
@@ -70,5 +104,6 @@ describe('triage action isolation', () => {
     assert.match(publisher, /git restore --staged -- "\$PREVIEW_DIRECTORY"/);
     assert.match(publisher, /docs: add triage preview for issue/);
     assert.match(publisher, /labels\.push\('claude-triage-preview'\)/);
+    assert.match(publisher, /Superseded by/);
   });
 });

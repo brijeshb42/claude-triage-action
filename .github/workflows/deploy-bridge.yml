@@ -54,10 +54,15 @@ jobs:
 
       - name: Create and hydrate smoke-test sandbox
         id: sandbox
-        uses: ./
-        with:
-          api-url: ${{ vars.SANDBOX_API_URL }}
-          api-key: ${{ secrets.SANDBOX_API_KEY }}
+        env:
+          SANDBOX_API_URL: ${{ vars.SANDBOX_API_URL }}
+          SANDBOX_API_KEY: ${{ secrets.SANDBOX_API_KEY }}
+        run: |
+          set -euo pipefail
+          sandbox_id="$(node dist/sandbox-cli.mjs create)"
+          echo "sandbox-id=$sandbox_id" >> "$GITHUB_OUTPUT"
+          node dist/sandbox-cli.mjs hydrate-worktree "$sandbox_id" .
+          node dist/sandbox-cli.mjs prepare-node "$sandbox_id" . auto > /dev/null
 
       - name: Destroy smoke-test sandbox
         if: always() && steps.sandbox.outputs.sandbox-id
@@ -65,5 +70,5 @@ jobs:
           SANDBOX_API_URL: ${{ vars.SANDBOX_API_URL }}
           SANDBOX_API_KEY: ${{ secrets.SANDBOX_API_KEY }}
         run: >-
-          node "${{ steps.sandbox.outputs.cli-path }}" destroy
+          node dist/sandbox-cli.mjs destroy
           "${{ steps.sandbox.outputs.sandbox-id }}"

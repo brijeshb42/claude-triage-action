@@ -5,12 +5,85 @@ commands and file mutations happen in an isolated Cloudflare Sandbox.
 
 The repository contains three pieces:
 
-- `action.yml` and `dist/`: a setup action plus a small stdio MCP server used by Claude Code.
-- `.github/workflows/triage.yml`: a reusable issue-triage workflow.
+- `action.yml`, `dist/`, and `plugin/`: the composite triage action, its sandbox MCP server,
+  and the non-interactive triage skill.
+- `publish/action.yml`: a separate composite publisher that validates the untrusted patch
+  before creating a draft pull request or issue comment.
 - `bridge/`: a lightly customized deployment of Cloudflare's supported Sandbox Bridge.
 
 Claude Code and Anthropic federation remain on the GitHub-hosted runner. The sandbox
 receives a tracked source snapshot but no Anthropic or GitHub credentials.
+
+Claude can use only the trusted `mui-triage-ci` skill and the explicitly listed `sandbox`
+MCP tools. Unlisted tool calls are denied, and native filesystem, shell, web, task,
+worktree, messaging, and scheduling tools are removed from its context. All repository
+access and execution crosses the authenticated Sandbox Bridge.
+
+## Workflow setup
+
+The repository using the action owns its workflow trigger, runner labels, timeouts, and
+job permissions. The model and publisher remain separate jobs so the model never receives
+a write-enabled GitHub token. Both jobs can select any runner that supports composite
+JavaScript actions and Bash.
+
+```yaml
+name: Claude issue triage
+
+on:
+  issue_comment:
+    types: [created]
+
+permissions: {}
+
+jobs:
+  agent:
+    if: >-
+      github.event.issue.pull_request == null &&
+      contains(github.event.comment.body, '@claude triage') &&
+      contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association)
+    runs-on: ubuntu-24.04 # Selected by the repository using the action.
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      id-token: write
+      issues: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: brijeshb42/claude-triage-action@<full-commit-sha>
+        with:
+          sandbox-api-url: ${{ vars.SANDBOX_API_URL }}
+          sandbox-api-key: ${{ secrets.SANDBOX_API_KEY }}
+          anthropic-federation-rule-id: ${{ vars.ANTHROPIC_FEDERATION_RULE_ID }}
+          anthropic-organization-id: ${{ vars.ANTHROPIC_ORGANIZATION_ID }}
+          anthropic-service-account-id: ${{ vars.ANTHROPIC_SERVICE_ACCOUNT_ID }}
+          anthropic-workspace-id: ${{ vars.ANTHROPIC_WORKSPACE_ID }}
+          github-token: ${{ github.token }}
+          issue-number: ${{ github.event.issue.number }}
+          artifact-name: claude-triage-${{ github.event.issue.number }}-${{ github.run_id }}
+
+  publish:
+    needs: agent
+    if: always() && needs.agent.result != 'skipped'
+    runs-on: ubuntu-24.04 # May differ from the agent runner.
+    timeout-minutes: 10
+    permissions:
+      contents: write
+      issues: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: brijeshb42/claude-triage-action/publish@<full-commit-sha>
+        with:
+          artifact-name: claude-triage-${{ github.event.issue.number }}-${{ github.run_id }}
+          github-token: ${{ github.token }}
+          issue-number: ${{ github.event.issue.number }}
+          default-branch: ${{ github.event.repository.default_branch }}
+```
+
+An acknowledgement reaction can be a third, short repository-owned job with only
+`issues: write`. Keeping it outside the agent job preserves the read-only model boundary.
 
 ## Development
 

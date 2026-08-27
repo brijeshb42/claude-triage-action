@@ -1,0 +1,205 @@
+name: Publish Cloudflare-sandboxed Claude triage
+description: Validate an untrusted triage patch, create a draft pull request, and report on the issue.
+
+inputs:
+  artifact-name:
+    description: Artifact produced by the triage action.
+    required: true
+  github-token:
+    description: Write-enabled GitHub token used only by this publisher action.
+    required: true
+  issue-number:
+    description: Issue number that triggered triage.
+    required: true
+  default-branch:
+    description: Base branch for a draft pull request.
+    required: true
+  working-directory:
+    description: Checked-out repository where the patch is validated and committed.
+    default: .
+
+outputs:
+  pr-url:
+    description: URL of the draft pull request, when a patch was accepted.
+    value: ${{ steps.pr.outputs.url }}
+
+runs:
+  using: composite
+  steps:
+    - name: Set up the publisher's Node.js runtime
+      uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      with:
+        node-version: 22.23.2
+
+    - name: Download the untrusted agent artifact
+      uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+      with:
+        name: ${{ inputs.artifact-name }}
+        path: ${{ runner.temp }}/claude-triage
+
+    - name: Validate and stage the patch without executing repository code
+      id: patch
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      env:
+        PATCH_PATH: ${{ runner.temp }}/claude-triage/claude-triage.patch
+      run: |
+        set -euo pipefail
+        test "$(wc -c < "$PATCH_PATH")" -le 8388608
+        if [ ! -s "$PATCH_PATH" ]; then
+          echo "has-changes=false" >> "$GITHUB_OUTPUT"
+          exit 0
+        fi
+
+        git -c core.hooksPath=/dev/null apply --binary --index --whitespace=nowarn "$PATCH_PATH"
+        git diff --cached --check
+
+        changed_count="$(git diff --cached --name-only | wc -l | tr -d ' ')"
+        test "$changed_count" -le 100
+        while IFS= read -r -d '' changed_path; do
+          case "$changed_path" in
+            .github/*|.gitmodules|.gitattributes)
+              echo "Refusing agent change to protected path: $changed_path" >&2
+              exit 1
+              ;;
+          esac
+        done < <(git diff --cached --name-only -z)
+
+        if git diff --cached --summary | grep -q 'mode 120000'; then
+          echo 'Refusing agent-created or modified symbolic links.' >&2
+          exit 1
+        fi
+        echo "has-changes=true" >> "$GITHUB_OUTPUT"
+
+    - name: Prepare pull request metadata
+      id: metadata
+      if: steps.patch.outputs.has-changes == 'true'
+      shell: bash
+      env:
+        ISSUE_NUMBER: ${{ inputs.issue-number }}
+        RESULT_PATH: ${{ runner.temp }}/claude-triage/claude-triage-result.json
+      run: |
+        node --input-type=module <<'NODE'
+        import { appendFileSync, readFileSync, writeFileSync } from 'node:fs';
+        const result = JSON.parse(readFileSync(process.env.RESULT_PATH, 'utf8'));
+        const title = String(result.prTitle || `fix: address issue #${process.env.ISSUE_NUMBER}`)
+          .replace(/[\r\n]+/g, ' ')
+          .slice(0, 240);
+        const body = [
+          String(result.prBody || result.summary || 'Automated triage fix.'),
+          '',
+          `Closes #${process.env.ISSUE_NUMBER}`,
+          '',
+          '> Draft created by the Cloudflare-sandboxed triage prototype. Review before merging.',
+        ].join('\n');
+        const metadataPath = `${process.env.RUNNER_TEMP}/claude-triage-pr.json`;
+        writeFileSync(metadataPath, JSON.stringify({ title, body }));
+        appendFileSync(process.env.GITHUB_OUTPUT, `title=${title}\nmetadata-path=${metadataPath}\n`);
+        NODE
+
+    - name: Commit and push the accepted patch
+      id: branch
+      if: steps.patch.outputs.has-changes == 'true'
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      env:
+        ISSUE_NUMBER: ${{ inputs.issue-number }}
+        PR_TITLE: ${{ steps.metadata.outputs.title }}
+      run: |
+        set -euo pipefail
+        branch="claude/triage-${ISSUE_NUMBER}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+        git config user.name 'github-actions[bot]'
+        git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+        git switch -c "$branch"
+        git -c core.hooksPath=/dev/null commit -m "$PR_TITLE"
+        git push origin "$branch"
+        echo "name=$branch" >> "$GITHUB_OUTPUT"
+
+    - name: Create draft pull request
+      id: pr
+      if: steps.patch.outputs.has-changes == 'true'
+      uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+      env:
+        BASE_BRANCH: ${{ inputs.default-branch }}
+        HEAD_BRANCH: ${{ steps.branch.outputs.name }}
+        METADATA_PATH: ${{ steps.metadata.outputs.metadata-path }}
+      with:
+        github-token: ${{ inputs.github-token }}
+        script: |
+          const fs = require('fs');
+          const metadata = JSON.parse(fs.readFileSync(process.env.METADATA_PATH, 'utf8'));
+          const { data: pullRequest } = await github.rest.pulls.create({
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            base: process.env.BASE_BRANCH,
+            head: process.env.HEAD_BRANCH,
+            title: metadata.title,
+            body: metadata.body,
+            draft: true,
+          });
+          core.setOutput('url', pullRequest.html_url);
+
+    - name: Publish triage result
+      if: always()
+      uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+      env:
+        ISSUE_NUMBER: ${{ inputs.issue-number }}
+        RESULT_PATH: ${{ runner.temp }}/claude-triage/claude-triage-result.json
+        PATCH_OUTCOME: ${{ steps.patch.outcome }}
+        PR_URL: ${{ steps.pr.outputs.url }}
+      with:
+        github-token: ${{ inputs.github-token }}
+        script: |
+          const fs = require('fs');
+          const marker = '<!-- claude-cloudflare-triage -->';
+          let result;
+          try {
+            result = JSON.parse(fs.readFileSync(process.env.RESULT_PATH, 'utf8'));
+          } catch {
+            result = {
+              summary: 'The triage run failed before producing a result.',
+              probableCause: 'No result artifact was available.',
+              confidence: 'low',
+              validation: 'Not run.',
+            };
+          }
+          const prLine = process.env.PR_URL
+            ? `**Draft fix:** ${process.env.PR_URL}`
+            : process.env.PATCH_OUTCOME === 'failure'
+              ? '**Draft fix:** A patch was produced but rejected by the publisher safety checks.'
+              : '**Draft fix:** No code change was produced.';
+          const body = [
+            marker,
+            '## Claude triage',
+            '',
+            String(result.summary),
+            '',
+            `**Probable cause (${result.confidence} confidence):** ${result.probableCause}`,
+            '',
+            `**Validation:** ${result.validation}`,
+            '',
+            prLine,
+          ].join('\n');
+          const issue_number = Number(process.env.ISSUE_NUMBER);
+          const { data: comments } = await github.rest.issues.listComments({
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            issue_number,
+            per_page: 100,
+          });
+          const existing = comments.find((comment) => comment.body?.includes(marker));
+          if (existing) {
+            await github.rest.issues.updateComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              comment_id: existing.id,
+              body,
+            });
+          } else {
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number,
+              body,
+            });
+          }

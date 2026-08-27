@@ -4,6 +4,7 @@ import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { z } from 'zod';
 import { SandboxBridgeClient } from './bridge-client.js';
 import { loadSandboxEnvironment } from './config.js';
+import { createRepositoryCommand } from './node-command.js';
 import { resolveWorkspacePath } from './workspace.js';
 
 const environment = loadSandboxEnvironment();
@@ -113,11 +114,21 @@ server.registerTool(
   },
   async ({ command, cwd, timeoutMs, maxOutputChars }) =>
     text(
-      await client.exec(environment.sandboxId, ['bash', '-lc', command], {
-        cwd: resolveWorkspacePath(cwd),
-        timeoutMs,
-        maxOutputChars,
-      }),
+      await client.exec(
+        environment.sandboxId,
+        [
+          'bash',
+          '-lc',
+          environment.nodeBinPath
+            ? createRepositoryCommand(command, environment.nodeBinPath)
+            : command,
+        ],
+        {
+          cwd: resolveWorkspacePath(cwd),
+          timeoutMs,
+          maxOutputChars,
+        },
+      ),
     ),
 );
 

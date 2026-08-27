@@ -4,6 +4,7 @@ import * as path from 'node:path';
 import { createArchiveChunks } from './archive.js';
 import { SandboxBridgeClient } from './bridge-client.js';
 import { loadBridgeEnvironment } from './config.js';
+import { prepareNodeRuntime } from './node-runtime.js';
 
 function requiredArgument(value: string | undefined, description: string): string {
   if (!value) {
@@ -67,6 +68,24 @@ async function main(): Promise<void> {
     return;
   }
 
+  if (command === 'prepare-node') {
+    const sandboxId = requiredArgument(args[0], 'sandbox ID');
+    const repositoryDirectory = path.resolve(requiredArgument(args[1], 'repository directory'));
+    const requestedVersion = args[2] || 'auto';
+    const runtime = await prepareNodeRuntime(
+      client,
+      sandboxId,
+      repositoryDirectory,
+      requestedVersion,
+    );
+    process.stderr.write(
+      `Selected Node.js ${runtime.version} from ${runtime.requirement.source} ` +
+        `(${runtime.requirement.range}).\n`,
+    );
+    process.stdout.write(`${JSON.stringify(runtime)}\n`);
+    return;
+  }
+
   if (command === 'export-patch') {
     const sandboxId = requiredArgument(args[0], 'sandbox ID');
     const outputPath = path.resolve(requiredArgument(args[1], 'patch output path'));
@@ -99,14 +118,24 @@ async function main(): Promise<void> {
 
   if (command === 'mcp-config') {
     const serverPath = path.resolve(requiredArgument(args[0], 'MCP server path'));
+    const nodeBinPath = args[1];
     process.stdout.write(
-      `${JSON.stringify({ mcpServers: { sandbox: { type: 'stdio', command: 'node', args: [serverPath] } } })}\n`,
+      `${JSON.stringify({
+        mcpServers: {
+          sandbox: {
+            type: 'stdio',
+            command: 'node',
+            args: [serverPath],
+            ...(nodeBinPath ? { env: { SANDBOX_NODE_BIN: nodeBinPath } } : {}),
+          },
+        },
+      })}\n`,
     );
     return;
   }
 
   throw new Error(
-    'Usage: sandbox-cli <create|destroy|hydrate-worktree|upload-issue-context|export-patch|mcp-config> [...args]',
+    'Usage: sandbox-cli <create|destroy|hydrate-worktree|prepare-node|upload-issue-context|export-patch|mcp-config> [...args]',
   );
 }
 

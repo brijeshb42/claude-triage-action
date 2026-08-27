@@ -44,6 +44,26 @@ deployment is intended.
 The container image is pinned to the same version as `@cloudflare/sandbox` and adds the
 Node.js and pnpm versions used by MUI.
 
+### Repository Node.js version
+
+Repository commands default to `node-version: auto`. For every sandbox, the action reads
+the root `package.json#engines.node`, resolves the oldest published Linux x64 Node.js
+release satisfying that range, and uses it for all agent commands. This deliberately
+tests the repository's minimum supported runtime rather than the developer-preferred
+version. If `engines.node` is absent, the action checks `.node-version`, `.nvmrc`, and
+`package.json#volta.node`, in that order, before falling back to the image's Node.js
+version.
+
+When the selected version is not already in the image, the action downloads the official
+Node.js archive into the credential-free sandbox and verifies its SHA-256 checksum before
+using it. Callers can override repository detection with a semver range:
+
+```yaml
+uses: brijeshb42/claude-triage-action@main
+with:
+  node-version: 24.x
+```
+
 ## Prototype status
 
 This is deliberately a lab repository. The first version uses the Bridge bearer token

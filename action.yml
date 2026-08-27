@@ -14,6 +14,9 @@ inputs:
   issue-context:
     description: Optional JSON issue context to place outside the sandbox repository.
     required: false
+  node-version:
+    description: Node.js semver range, or auto to use the repository's minimum supported version.
+    default: auto
 
 outputs:
   sandbox-id:
@@ -28,6 +31,9 @@ outputs:
   plugin-dir:
     description: Path to the trusted non-interactive triage skill plugin.
     value: ${{ steps.setup.outputs.plugin-dir }}
+  node-version:
+    description: Resolved published Node.js version used for repository commands.
+    value: ${{ steps.setup.outputs.node-version }}
 
 runs:
   using: composite
@@ -40,6 +46,7 @@ runs:
         SANDBOX_API_KEY: ${{ inputs.api-key }}
         REPOSITORY_DIRECTORY: ${{ inputs.working-directory }}
         ISSUE_CONTEXT: ${{ inputs.issue-context }}
+        REPOSITORY_NODE_VERSION: ${{ inputs.node-version }}
       run: |
         set -euo pipefail
         sandbox_id="$(node "$GITHUB_ACTION_PATH/dist/sandbox-cli.mjs" create)"
@@ -51,6 +58,11 @@ runs:
         node "$GITHUB_ACTION_PATH/dist/sandbox-cli.mjs" hydrate-worktree \
           "$sandbox_id" "$REPOSITORY_DIRECTORY"
 
+        node_runtime="$(node "$GITHUB_ACTION_PATH/dist/sandbox-cli.mjs" prepare-node \
+          "$sandbox_id" "$REPOSITORY_DIRECTORY" "$REPOSITORY_NODE_VERSION")"
+        node_bin="$(node -e 'process.stdout.write(JSON.parse(process.argv[1]).binPath)' "$node_runtime")"
+        resolved_node_version="$(node -e 'process.stdout.write(JSON.parse(process.argv[1]).version)' "$node_runtime")"
+
         if [ -n "$ISSUE_CONTEXT" ]; then
           node "$GITHUB_ACTION_PATH/dist/sandbox-cli.mjs" upload-issue-context \
             "$sandbox_id" "$ISSUE_CONTEXT"
@@ -58,12 +70,13 @@ runs:
 
         mcp_config="$RUNNER_TEMP/cloudflare-sandbox-$sandbox_id.mcp.json"
         node "$GITHUB_ACTION_PATH/dist/sandbox-cli.mjs" mcp-config \
-          "$GITHUB_ACTION_PATH/dist/sandbox-mcp.mjs" > "$mcp_config"
+          "$GITHUB_ACTION_PATH/dist/sandbox-mcp.mjs" "$node_bin" > "$mcp_config"
 
         {
           echo "sandbox-id=$sandbox_id"
           echo "mcp-config=$mcp_config"
           echo "cli-path=$GITHUB_ACTION_PATH/dist/sandbox-cli.mjs"
           echo "plugin-dir=$GITHUB_ACTION_PATH/plugin"
+          echo "node-version=$resolved_node_version"
         } >> "$GITHUB_OUTPUT"
         trap - ERR

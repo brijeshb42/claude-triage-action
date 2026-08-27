@@ -2,6 +2,7 @@ export interface SandboxEnvironment {
   apiUrl: string;
   apiKey: string;
   sandboxId: string;
+  nodeBinPath?: string;
 }
 
 function requiredEnvironmentVariable(name: string): string {
@@ -13,10 +14,12 @@ function requiredEnvironmentVariable(name: string): string {
 }
 
 export function loadSandboxEnvironment(): SandboxEnvironment {
+  const nodeBinPath = process.env.SANDBOX_NODE_BIN;
   return {
     apiUrl: requiredEnvironmentVariable('SANDBOX_API_URL'),
     apiKey: requiredEnvironmentVariable('SANDBOX_API_KEY'),
     sandboxId: requiredEnvironmentVariable('SANDBOX_ID'),
+    ...(nodeBinPath ? { nodeBinPath } : {}),
   };
 }
 

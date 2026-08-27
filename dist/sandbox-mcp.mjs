@@ -31418,11 +31418,25 @@ function requiredEnvironmentVariable(name) {
   return value;
 }
 function loadSandboxEnvironment() {
+  const nodeBinPath = process.env.SANDBOX_NODE_BIN;
   return {
     apiUrl: requiredEnvironmentVariable("SANDBOX_API_URL"),
     apiKey: requiredEnvironmentVariable("SANDBOX_API_KEY"),
-    sandboxId: requiredEnvironmentVariable("SANDBOX_ID")
+    sandboxId: requiredEnvironmentVariable("SANDBOX_ID"),
+    ...nodeBinPath ? { nodeBinPath } : {}
   };
+}
+
+// src/node-command.ts
+function assertNodeBinPath(nodeBinPath) {
+  if (nodeBinPath !== "/usr/local/bin" && !/^\/workspace\/\.claude-triage\/node\/v\d+\.\d+\.\d+\/bin$/.test(nodeBinPath)) {
+    throw new Error(`Unexpected sandbox Node.js binary path: ${nodeBinPath}.`);
+  }
+}
+function createRepositoryCommand(command, nodeBinPath) {
+  assertNodeBinPath(nodeBinPath);
+  return `export PATH='${nodeBinPath}':$PATH
+${command}`;
 }
 
 // src/workspace.ts
@@ -31539,11 +31553,19 @@ server.registerTool(
     }
   },
   async ({ command, cwd, timeoutMs, maxOutputChars }) => text(
-    await client.exec(environment.sandboxId, ["bash", "-lc", command], {
-      cwd: resolveWorkspacePath(cwd),
-      timeoutMs,
-      maxOutputChars
-    })
+    await client.exec(
+      environment.sandboxId,
+      [
+        "bash",
+        "-lc",
+        environment.nodeBinPath ? createRepositoryCommand(command, environment.nodeBinPath) : command
+      ],
+      {
+        cwd: resolveWorkspacePath(cwd),
+        timeoutMs,
+        maxOutputChars
+      }
+    )
   )
 );
 server.registerTool(

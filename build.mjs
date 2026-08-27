@@ -20,4 +20,9 @@ await Promise.all([
     entryPoints: ['src/sandbox-mcp.ts'],
     outfile: 'dist/sandbox-mcp.mjs',
   }),
+  build({
+    ...shared,
+    entryPoints: ['src/save-agent-result.ts'],
+    outfile: 'dist/save-agent-result.mjs',
+  }),
 ]);

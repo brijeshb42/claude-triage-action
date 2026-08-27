@@ -201,33 +201,9 @@ runs:
       shell: bash
       env:
         RESULT_JSON: ${{ steps.claude.outputs.structured_output }}
+        EXECUTION_FILE: ${{ steps.claude.outputs.execution_file }}
         RESULT_PATH: ${{ runner.temp }}/claude-triage-result.json
-      run: |
-        node --input-type=module <<'NODE'
-        import { writeFileSync } from 'node:fs';
-        const fallback = {
-          summary: 'Claude did not return a structured triage result.',
-          probableCause: 'The agent step failed or reached its hard limit.',
-          confidence: 'low',
-          fixAttempted: false,
-          fixComplete: false,
-          prTitle: '',
-          prBody: '',
-          validation: 'No validation result was returned.',
-          previewAttempted: false,
-          previewReady: false,
-          previewValidation: 'No preview validation result was returned.',
-        };
-        let result = fallback;
-        if (process.env.RESULT_JSON) {
-          try {
-            result = JSON.parse(process.env.RESULT_JSON);
-          } catch {
-            result = fallback;
-          }
-        }
-        writeFileSync(process.env.RESULT_PATH, JSON.stringify(result, null, 2));
-        NODE
+      run: node "$GITHUB_ACTION_PATH/dist/save-agent-result.mjs"
 
     - name: Export sandbox patch
       if: always() && steps.setup.outputs.sandbox-id != ''

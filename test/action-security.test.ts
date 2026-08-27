@@ -41,6 +41,11 @@ describe('triage action isolation', () => {
       action,
       /^\s+CLAUDE_STREAM_IDLE_TIMEOUT_MS: \$\{\{ inputs\.claude-stream-idle-timeout-ms \}\}$/m,
     );
+    assert.match(
+      action,
+      /^\s+EXECUTION_FILE: \$\{\{ steps\.claude\.outputs\.execution_file \}\}$/m,
+    );
+    assert.match(action, /dist\/save-agent-result\.mjs/);
   });
 
   it('keeps publication in a separate composite action', async () => {

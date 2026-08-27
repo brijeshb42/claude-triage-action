@@ -107,6 +107,7 @@ async function extractRepositoryArchive(
 
     try {
       const extractResult = await client.exec(sandboxId, ['bash', '-lc', extractionScript], {
+        cwd: '/workspace',
         timeoutMs: 300_000,
       });
       if (extractResult.exitCode === 0) {

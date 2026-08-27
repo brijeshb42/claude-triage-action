@@ -1719,6 +1719,7 @@ async function extractRepositoryArchive(client, sandboxId, archive) {
     }
     try {
       const extractResult = await client.exec(sandboxId, ["bash", "-lc", extractionScript], {
+        cwd: "/workspace",
         timeoutMs: 3e5
       });
       if (extractResult.exitCode === 0) {

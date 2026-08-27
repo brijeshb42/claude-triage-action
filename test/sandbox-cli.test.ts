@@ -19,10 +19,12 @@ describe('hydrateRepositoryArchive', () => {
 
     const uploadCounts = new Map<string, number>();
     let execCount = 0;
+    const execWorkingDirectories: string[] = [];
     const server = createServer(async (request, response) => {
       const requestUrl = request.url ?? '';
-      for await (const _chunk of request) {
-        // Consume request bodies before responding, as the real Bridge does.
+      const requestChunks: Buffer[] = [];
+      for await (const chunk of request) {
+        requestChunks.push(Buffer.from(chunk));
       }
 
       if (request.method === 'GET') {
@@ -46,6 +48,16 @@ describe('hydrateRepositoryArchive', () => {
 
       if (request.method === 'POST' && requestUrl.endsWith('/exec')) {
         execCount += 1;
+        const requestBody: unknown = JSON.parse(Buffer.concat(requestChunks).toString('utf8'));
+        if (
+          !requestBody ||
+          typeof requestBody !== 'object' ||
+          !('cwd' in requestBody) ||
+          typeof requestBody.cwd !== 'string'
+        ) {
+          throw new Error('Exec request did not contain a string cwd.');
+        }
+        execWorkingDirectories.push(requestBody.cwd);
         response.writeHead(200, { 'Content-Type': 'text/event-stream' });
         if (execCount === 1) {
           response.end('event: error\ndata: {"error":"transient extraction failure"}\n\n');
@@ -83,6 +95,7 @@ describe('hydrateRepositoryArchive', () => {
       assert.equal(uploadCounts.get(`${fileUrlPrefix}.claude-triage-part-000001`), 2);
       assert.equal(uploadCounts.get(`${fileUrlPrefix}.claude-triage-part-000002`), 1);
       assert.equal(execCount, 3, 'two extraction attempts followed by one cleanup command');
+      assert.deepEqual(execWorkingDirectories, ['/workspace', '/workspace', '/workspace']);
     } finally {
       server.close();
       await once(server, 'close');

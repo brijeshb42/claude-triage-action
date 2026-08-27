@@ -26,6 +26,13 @@ function requiredArgument(value: string | undefined, description: string): strin
   return value;
 }
 
+function parseSnapshotExclusions(value: string | undefined): string[] {
+  return (value ?? '')
+    .split(/\r?\n/)
+    .map((pattern) => pattern.trim())
+    .filter((pattern) => pattern.length > 0 && !pattern.startsWith('#'));
+}
+
 async function initializeRepository(client: SandboxBridgeClient, sandboxId: string): Promise<void> {
   const commands = [
     ['git', 'init', '-b', 'claude-triage-base', '.'],
@@ -217,12 +224,24 @@ async function main(): Promise<void> {
   if (command === 'hydrate-worktree') {
     const sandboxId = requiredArgument(args[0], 'sandbox ID');
     const repositoryDirectory = path.resolve(requiredArgument(args[1], 'repository directory'));
-    const archive = await createRepositoryArchive(repositoryDirectory);
+    const snapshotExclusions = parseSnapshotExclusions(args[2]);
+    const archive = await createRepositoryArchive(
+      repositoryDirectory,
+      undefined,
+      snapshotExclusions,
+    );
     try {
       process.stderr.write(
         `Created ${archive.byteLength}-byte repository archive with ${archive.fileCount} tracked ` +
           `files in ${archive.partCount} parts.\n`,
       );
+      if (snapshotExclusions.length > 0) {
+        process.stderr.write(
+          `Excluded snapshot paths matching: ${snapshotExclusions
+            .map((pattern) => JSON.stringify(pattern))
+            .join(', ')}.\n`,
+        );
+      }
       await hydrateRepositoryArchive(client, sandboxId, archive);
     } finally {
       await archive.dispose();

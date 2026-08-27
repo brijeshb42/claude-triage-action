@@ -32,6 +32,9 @@ inputs:
   working-directory:
     description: Tracked Git checkout to hydrate into the sandbox.
     default: .
+  snapshot-excludes:
+    description: Newline-separated repository-relative Git pathspecs to omit from the sandbox snapshot.
+    default: ''
   node-version:
     description: Node.js semver range, or auto to use the repository's minimum supported version.
     default: auto
@@ -105,6 +108,7 @@ runs:
         SANDBOX_API_URL: ${{ inputs.sandbox-api-url }}
         SANDBOX_API_KEY: ${{ inputs.sandbox-api-key }}
         REPOSITORY_DIRECTORY: ${{ inputs.working-directory }}
+        REPOSITORY_SNAPSHOT_EXCLUDES: ${{ inputs.snapshot-excludes }}
         ISSUE_CONTEXT: ${{ runner.temp }}/claude-triage-issue.json
         REPOSITORY_NODE_VERSION: ${{ inputs.node-version }}
       run: |
@@ -116,7 +120,7 @@ runs:
         trap cleanup ERR
 
         node "$GITHUB_ACTION_PATH/dist/sandbox-cli.mjs" hydrate-worktree \
-          "$sandbox_id" "$REPOSITORY_DIRECTORY"
+          "$sandbox_id" "$REPOSITORY_DIRECTORY" "$REPOSITORY_SNAPSHOT_EXCLUDES"
 
         node_runtime="$(node "$GITHUB_ACTION_PATH/dist/sandbox-cli.mjs" prepare-node \
           "$sandbox_id" "$REPOSITORY_DIRECTORY" "$REPOSITORY_NODE_VERSION")"

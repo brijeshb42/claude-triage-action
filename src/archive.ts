@@ -7,7 +7,7 @@ import * as path from 'node:path';
 import { promisify } from 'node:util';
 
 const execFileAsync = promisify(execFile);
-const DEFAULT_ARCHIVE_PART_BYTES = 4 * 1024 * 1024;
+const DEFAULT_ARCHIVE_PART_BYTES = 16 * 1024 * 1024;
 
 export interface TrackedFile {
   name: string;
@@ -28,12 +28,34 @@ export interface ArchivePart {
   index: number;
 }
 
-async function trackedFiles(repositoryDirectory: string): Promise<TrackedFile[]> {
-  const { stdout } = await execFileAsync('git', ['ls-files', '-z'], {
-    cwd: repositoryDirectory,
-    encoding: 'buffer',
-    maxBuffer: 128 * 1024 * 1024,
-  });
+function exclusionPathspec(pattern: string): string {
+  if (
+    !pattern ||
+    pattern.includes('\0') ||
+    pattern.startsWith('/') ||
+    pattern.startsWith(':') ||
+    pattern.split('/').includes('..')
+  ) {
+    throw new Error(
+      `Snapshot exclusion must be a non-empty repository-relative Git pathspec: ${JSON.stringify(pattern)}.`,
+    );
+  }
+  return `:(exclude)${pattern}`;
+}
+
+async function trackedFiles(
+  repositoryDirectory: string,
+  excludedPathspecs: string[],
+): Promise<TrackedFile[]> {
+  const { stdout } = await execFileAsync(
+    'git',
+    ['ls-files', '-z', '--', '.', ...excludedPathspecs.map(exclusionPathspec)],
+    {
+      cwd: repositoryDirectory,
+      encoding: 'buffer',
+      maxBuffer: 128 * 1024 * 1024,
+    },
+  );
 
   const names = stdout
     .toString('utf8')
@@ -86,12 +108,13 @@ async function sha256File(filePath: string): Promise<string> {
 export async function createRepositoryArchive(
   repositoryDirectory: string,
   partBytes = DEFAULT_ARCHIVE_PART_BYTES,
+  excludedPathspecs: string[] = [],
 ): Promise<RepositoryArchive> {
   if (!Number.isSafeInteger(partBytes) || partBytes <= 0) {
     throw new Error('Archive part size must be a positive safe integer.');
   }
 
-  const files = await trackedFiles(repositoryDirectory);
+  const files = await trackedFiles(repositoryDirectory, excludedPathspecs);
   const temporaryDirectory = await mkdtemp(path.join(tmpdir(), 'claude-triage-archive-'));
   const archivePath = path.join(temporaryDirectory, 'repository.tar.gz');
 

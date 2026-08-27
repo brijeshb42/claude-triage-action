@@ -15,7 +15,7 @@ Claude Code and Anthropic federation remain on the GitHub-hosted runner. The san
 receives a tracked source snapshot but no Anthropic or GitHub credentials.
 
 Large tracked snapshots are compressed as one `tar.gz`, streamed to the Bridge as fixed
-4 MiB binary parts, reassembled with SHA-256 verification, and extracted once inside the
+16 MiB binary parts, reassembled with SHA-256 verification, and extracted once inside the
 sandbox. Each failed part is retried independently, and extraction retries reuse the uploaded
 parts.
 
@@ -68,6 +68,9 @@ jobs:
           issue-number: ${{ github.event.issue.number }}
           artifact-name: claude-triage-${{ github.event.issue.number }}-${{ github.run_id }}
           preview-directory: examples/triage-preview
+          snapshot-excludes: |
+            docs/public
+            coverage/**
 
   publish:
     needs: agent
@@ -91,6 +94,11 @@ jobs:
 
 An acknowledgement reaction can be a third, short repository-owned job with only
 `issues: write`. Keeping it outside the agent job preserves the read-only model boundary.
+
+`snapshot-excludes` accepts newline-separated, repository-relative Git pathspecs. Plain
+directory paths exclude their contents, and wildcard patterns can omit generated or bulky
+tracked assets. Exclusions affect only the credential-free sandbox snapshot; the runner
+checkout and publisher validation checkout remain complete.
 
 When a repository configures a disposable preview, keep a valid baseline project at that
 path and describe its provider and validation commands in `.github/claude-triage.yml`.

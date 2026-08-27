@@ -1198,13 +1198,25 @@ import { tmpdir } from "node:os";
 import * as path from "node:path";
 import { promisify } from "node:util";
 var execFileAsync = promisify(execFile);
-var DEFAULT_ARCHIVE_PART_BYTES = 4 * 1024 * 1024;
-async function trackedFiles(repositoryDirectory) {
-  const { stdout } = await execFileAsync("git", ["ls-files", "-z"], {
-    cwd: repositoryDirectory,
-    encoding: "buffer",
-    maxBuffer: 128 * 1024 * 1024
-  });
+var DEFAULT_ARCHIVE_PART_BYTES = 16 * 1024 * 1024;
+function exclusionPathspec(pattern) {
+  if (!pattern || pattern.includes("\0") || pattern.startsWith("/") || pattern.startsWith(":") || pattern.split("/").includes("..")) {
+    throw new Error(
+      `Snapshot exclusion must be a non-empty repository-relative Git pathspec: ${JSON.stringify(pattern)}.`
+    );
+  }
+  return `:(exclude)${pattern}`;
+}
+async function trackedFiles(repositoryDirectory, excludedPathspecs) {
+  const { stdout } = await execFileAsync(
+    "git",
+    ["ls-files", "-z", "--", ".", ...excludedPathspecs.map(exclusionPathspec)],
+    {
+      cwd: repositoryDirectory,
+      encoding: "buffer",
+      maxBuffer: 128 * 1024 * 1024
+    }
+  );
   const names = stdout.toString("utf8").split("\0").filter((name) => name.length > 0);
   return Promise.all(
     names.map(async (name) => {
@@ -1243,11 +1255,11 @@ async function sha256File(filePath) {
   }
   return hash.digest("hex");
 }
-async function createRepositoryArchive(repositoryDirectory, partBytes = DEFAULT_ARCHIVE_PART_BYTES) {
+async function createRepositoryArchive(repositoryDirectory, partBytes = DEFAULT_ARCHIVE_PART_BYTES, excludedPathspecs = []) {
   if (!Number.isSafeInteger(partBytes) || partBytes <= 0) {
     throw new Error("Archive part size must be a positive safe integer.");
   }
-  const files = await trackedFiles(repositoryDirectory);
+  const files = await trackedFiles(repositoryDirectory, excludedPathspecs);
   const temporaryDirectory = await mkdtemp(path.join(tmpdir(), "claude-triage-archive-"));
   const archivePath = path.join(temporaryDirectory, "repository.tar.gz");
   try {
@@ -1658,6 +1670,9 @@ function requiredArgument(value, description) {
   }
   return value;
 }
+function parseSnapshotExclusions(value) {
+  return (value ?? "").split(/\r?\n/).map((pattern) => pattern.trim()).filter((pattern) => pattern.length > 0 && !pattern.startsWith("#"));
+}
 async function initializeRepository(client, sandboxId) {
   const commands = [
     ["git", "init", "-b", "claude-triage-base", "."],
@@ -1810,12 +1825,23 @@ async function main() {
   if (command === "hydrate-worktree") {
     const sandboxId = requiredArgument(args[0], "sandbox ID");
     const repositoryDirectory = path3.resolve(requiredArgument(args[1], "repository directory"));
-    const archive = await createRepositoryArchive(repositoryDirectory);
+    const snapshotExclusions = parseSnapshotExclusions(args[2]);
+    const archive = await createRepositoryArchive(
+      repositoryDirectory,
+      void 0,
+      snapshotExclusions
+    );
     try {
       process.stderr.write(
         `Created ${archive.byteLength}-byte repository archive with ${archive.fileCount} tracked files in ${archive.partCount} parts.
 `
       );
+      if (snapshotExclusions.length > 0) {
+        process.stderr.write(
+          `Excluded snapshot paths matching: ${snapshotExclusions.map((pattern) => JSON.stringify(pattern)).join(", ")}.
+`
+        );
+      }
       await hydrateRepositoryArchive(client, sandboxId, archive);
     } finally {
       await archive.dispose();

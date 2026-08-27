@@ -78,7 +78,36 @@ describe('createRepositoryArchive', () => {
 
       const archive = await createRepositoryArchive(repositoryDirectory);
       try {
+        assert.equal(archive.partBytes, 16 * 1024 * 1024);
         assert.ok(archive.byteLength < Buffer.byteLength(content) / 10);
+      } finally {
+        await archive.dispose();
+      }
+    } finally {
+      await rm(repositoryDirectory, { recursive: true, force: true });
+    }
+  });
+
+  it('excludes tracked directories and files matching Git pathspecs', async () => {
+    const repositoryDirectory = await mkdtemp(path.join(tmpdir(), 'claude-triage-repository-'));
+
+    try {
+      await mkdir(path.join(repositoryDirectory, 'docs', 'public'), { recursive: true });
+      await mkdir(path.join(repositoryDirectory, 'src'));
+      await writeFile(path.join(repositoryDirectory, 'docs', 'public', 'asset.png'), 'asset');
+      await writeFile(path.join(repositoryDirectory, 'docs', 'guide.md'), 'guide');
+      await writeFile(path.join(repositoryDirectory, 'src', 'index.ts'), 'export {};\n');
+      await execFileAsync('git', ['init'], { cwd: repositoryDirectory });
+      await execFileAsync('git', ['add', '.'], { cwd: repositoryDirectory });
+
+      const archive = await createRepositoryArchive(repositoryDirectory, 1024, [
+        'docs/public',
+        'docs/*.md',
+      ]);
+      try {
+        assert.equal(archive.fileCount, 1);
+        const { stdout } = await execFileAsync('tar', ['--list', '--file', archive.path]);
+        assert.equal(stdout.trim(), 'repo/src/index.ts');
       } finally {
         await archive.dispose();
       }

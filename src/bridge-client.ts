@@ -10,7 +10,15 @@ interface ExecOptions {
   cwd?: string;
   timeoutMs?: number;
   maxOutputChars?: number;
+  signal?: AbortSignal;
 }
+
+interface RequestOptions extends RequestInit {
+  timeoutMs?: number;
+}
+
+const DEFAULT_REQUEST_TIMEOUT_MS = 60_000;
+const EXEC_REQUEST_GRACE_MS = 30_000;
 
 interface ParsedSseEvent {
   event: string;
@@ -130,15 +138,36 @@ export class SandboxBridgeClient {
     this.#apiKey = apiKey;
   }
 
-  async #request(relativePath: string, init: RequestInit = {}): Promise<Response> {
+  async #request(relativePath: string, init: RequestOptions = {}): Promise<Response> {
     const headers = new Headers(init.headers);
     headers.set('Authorization', `Bearer ${this.#apiKey}`);
 
-    const response = await fetch(new URL(relativePath, this.#apiUrl), { ...init, headers });
+    const { timeoutMs = DEFAULT_REQUEST_TIMEOUT_MS, ...requestInit } = init;
+    const timeoutSignal = AbortSignal.timeout(timeoutMs);
+
+    let response: Response;
+    try {
+      response = await fetch(new URL(relativePath, this.#apiUrl), {
+        ...requestInit,
+        headers,
+        signal: requestInit.signal
+          ? AbortSignal.any([requestInit.signal, timeoutSignal])
+          : timeoutSignal,
+      });
+    } catch (error) {
+      if (timeoutSignal.aborted) {
+        throw new Error(
+          `Sandbox Bridge request timed out after ${timeoutMs}ms: ` +
+            `${requestInit.method ?? 'GET'} ${relativePath}`,
+          { cause: error },
+        );
+      }
+      throw error;
+    }
     if (!response.ok) {
       const body = (await response.text()).slice(0, 4_000);
       throw new Error(
-        `Sandbox Bridge request failed: ${init.method ?? 'GET'} ${relativePath} ` +
+        `Sandbox Bridge request failed: ${requestInit.method ?? 'GET'} ${relativePath} ` +
           `returned ${response.status}: ${body}`,
       );
     }
@@ -164,10 +193,11 @@ export class SandboxBridgeClient {
     await this.#request(`v1/sandbox/${encodeURIComponent(sandboxId)}`, { method: 'DELETE' });
   }
 
-  async readFile(sandboxId: string, filePath: string): Promise<string> {
+  async readFile(sandboxId: string, filePath: string, signal?: AbortSignal): Promise<string> {
     const relativePath = encodeFilePath(filePath);
     const response = await this.#request(
       `v1/sandbox/${encodeURIComponent(sandboxId)}/file/${relativePath}`,
+      signal ? { signal } : {},
     );
     return response.text();
   }
@@ -176,24 +206,29 @@ export class SandboxBridgeClient {
     sandboxId: string,
     filePath: string,
     content: string | Uint8Array,
+    signal?: AbortSignal,
   ): Promise<void> {
     const relativePath = encodeFilePath(filePath);
     await this.#request(`v1/sandbox/${encodeURIComponent(sandboxId)}/file/${relativePath}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/octet-stream' },
       body: typeof content === 'string' ? content : new Uint8Array(content).buffer,
+      ...(signal ? { signal } : {}),
     });
   }
 
   async exec(sandboxId: string, argv: string[], options: ExecOptions = {}): Promise<ExecResult> {
+    const commandTimeoutMs = options.timeoutMs ?? 120_000;
     const response = await this.#request(`v1/sandbox/${encodeURIComponent(sandboxId)}/exec`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         argv,
         cwd: options.cwd ?? '/workspace/repo',
-        timeout_ms: options.timeoutMs ?? 120_000,
+        timeout_ms: commandTimeoutMs,
       }),
+      ...(options.signal ? { signal: options.signal } : {}),
+      timeoutMs: commandTimeoutMs + EXEC_REQUEST_GRACE_MS,
     });
     return parseExecSse(await response.text(), options.maxOutputChars);
   }

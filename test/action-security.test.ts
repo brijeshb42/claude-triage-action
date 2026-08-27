@@ -82,6 +82,11 @@ describe('triage action isolation', () => {
       action,
       /^\s+CLAUDE_STREAM_IDLE_TIMEOUT_MS: \$\{\{ inputs\.claude-stream-idle-timeout-ms \}\}$/m,
     );
+    assert.match(action, /^\s+MCP_TIMEOUT: \$\{\{ inputs\.mcp-startup-timeout-ms \}\}$/m);
+    assert.match(action, /^\s+MCP_TOOL_TIMEOUT: \$\{\{ inputs\.mcp-tool-timeout-ms \}\}$/m);
+    assert.match(action, /^\s+mcp-tool-timeout-ms:$/m);
+    assert.match(action, /Each sandbox tool call has a hard/);
+    assert.match(action, /retry it at most once/);
     assert.match(
       action,
       /^\s+EXECUTION_FILE: \$\{\{ steps\.claude\.outputs\.execution_file \}\}$/m,
@@ -121,6 +126,9 @@ describe('triage action isolation', () => {
     assert.match(fix, /mcp__sandbox__apply_patch/);
     assert.match(fix, /validate-triage-artifact\.mjs/);
     assert.match(fix, /persist-credentials: false/);
+    assert.match(fix, /^\s+MCP_TIMEOUT: \$\{\{ inputs\.mcp-startup-timeout-ms \}\}$/m);
+    assert.match(fix, /^\s+MCP_TOOL_TIMEOUT: \$\{\{ inputs\.mcp-tool-timeout-ms \}\}$/m);
+    assert.match(fix, /retry it at most once/);
     assert.doesNotMatch(fix, /permission-issues: write/);
   });
 

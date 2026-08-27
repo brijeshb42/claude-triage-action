@@ -62,6 +62,12 @@ The action sets both Claude Code response-stream watchdogs from
 `claude-stream-idle-timeout-ms` (10 minutes by default). This avoids the shorter first-party
 idle timeout aborting a valid long-thinking turn before Claude emits its first response byte.
 
+Sandbox MCP startup is bounded by `mcp-startup-timeout-ms` (30 seconds by default), and each
+tool call is bounded by `mcp-tool-timeout-ms` (10 minutes by default). Claude Code otherwise
+allows an MCP tool to run for roughly 28 hours, which is unsuitable for a CI job when a remote
+sandbox becomes unreachable. Bridge HTTP requests also stop shortly after their corresponding
+sandbox command deadline so cleanup cannot consume the rest of the job indefinitely.
+
 When a repository configures a disposable preview, keep a valid baseline project at that
 path and describe its provider and validation commands in `.github/claude-triage.yml`.
 The publisher accepts preview changes only alongside a real fix and only after the sandbox

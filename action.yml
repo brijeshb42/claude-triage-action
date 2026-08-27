@@ -50,6 +50,12 @@ inputs:
   claude-stream-idle-timeout-ms:
     description: Maximum silence allowed while waiting for bytes from Claude's response stream.
     default: '600000'
+  mcp-startup-timeout-ms:
+    description: Maximum time allowed for the sandbox MCP server to start.
+    default: '30000'
+  mcp-tool-timeout-ms:
+    description: Maximum time allowed for one sandbox MCP tool call.
+    default: '600000'
   show-full-output:
     description: Show Claude's full output for debugging in non-sensitive repositories.
     default: 'false'
@@ -153,6 +159,8 @@ runs:
         SANDBOX_ID: ${{ steps.setup.outputs.sandbox-id }}
         CLAUDE_BYTE_STREAM_IDLE_TIMEOUT_MS: ${{ inputs.claude-stream-idle-timeout-ms }}
         CLAUDE_STREAM_IDLE_TIMEOUT_MS: ${{ inputs.claude-stream-idle-timeout-ms }}
+        MCP_TIMEOUT: ${{ inputs.mcp-startup-timeout-ms }}
+        MCP_TOOL_TIMEOUT: ${{ inputs.mcp-tool-timeout-ms }}
       with:
         anthropic_federation_rule_id: ${{ inputs.anthropic-federation-rule-id }}
         anthropic_organization_id: ${{ inputs.anthropic-organization-id }}
@@ -189,6 +197,10 @@ runs:
           the priority: once roughly 80% of the budget is used, stop broad investigation,
           complete only essential validation, and return the required structured result.
           A concise result that lands is better than a thorough one lost at the hard cap.
+
+          Each sandbox tool call has a hard ${{ inputs.mcp-tool-timeout-ms }}ms deadline. If a call
+          times out, retry it at most once when a retry is safe, then return a structured incomplete
+          result instead of waiting or retrying indefinitely.
         claude_args: |
           --model ${{ inputs.model }}
           --mcp-config ${{ steps.setup.outputs.mcp-config }}

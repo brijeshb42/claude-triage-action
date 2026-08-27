@@ -1304,6 +1304,8 @@ async function* readArchiveParts(archivePath, partBytes = DEFAULT_ARCHIVE_PART_B
 }
 
 // src/bridge-client.ts
+var DEFAULT_REQUEST_TIMEOUT_MS = 6e4;
+var EXEC_REQUEST_GRACE_MS = 3e4;
 function appendWithLimit(current, addition, limit) {
   if (current.length >= limit) {
     return { value: current, truncated: addition.length > 0 };
@@ -1386,11 +1388,28 @@ var SandboxBridgeClient = class {
   async #request(relativePath, init = {}) {
     const headers = new Headers(init.headers);
     headers.set("Authorization", `Bearer ${this.#apiKey}`);
-    const response = await fetch(new URL(relativePath, this.#apiUrl), { ...init, headers });
+    const { timeoutMs = DEFAULT_REQUEST_TIMEOUT_MS, ...requestInit } = init;
+    const timeoutSignal = AbortSignal.timeout(timeoutMs);
+    let response;
+    try {
+      response = await fetch(new URL(relativePath, this.#apiUrl), {
+        ...requestInit,
+        headers,
+        signal: requestInit.signal ? AbortSignal.any([requestInit.signal, timeoutSignal]) : timeoutSignal
+      });
+    } catch (error) {
+      if (timeoutSignal.aborted) {
+        throw new Error(
+          `Sandbox Bridge request timed out after ${timeoutMs}ms: ${requestInit.method ?? "GET"} ${relativePath}`,
+          { cause: error }
+        );
+      }
+      throw error;
+    }
     if (!response.ok) {
       const body = (await response.text()).slice(0, 4e3);
       throw new Error(
-        `Sandbox Bridge request failed: ${init.method ?? "GET"} ${relativePath} returned ${response.status}: ${body}`
+        `Sandbox Bridge request failed: ${requestInit.method ?? "GET"} ${relativePath} returned ${response.status}: ${body}`
       );
     }
     return response;
@@ -1406,30 +1425,35 @@ var SandboxBridgeClient = class {
   async destroy(sandboxId) {
     await this.#request(`v1/sandbox/${encodeURIComponent(sandboxId)}`, { method: "DELETE" });
   }
-  async readFile(sandboxId, filePath) {
+  async readFile(sandboxId, filePath, signal) {
     const relativePath = encodeFilePath(filePath);
     const response = await this.#request(
-      `v1/sandbox/${encodeURIComponent(sandboxId)}/file/${relativePath}`
+      `v1/sandbox/${encodeURIComponent(sandboxId)}/file/${relativePath}`,
+      signal ? { signal } : {}
     );
     return response.text();
   }
-  async writeFile(sandboxId, filePath, content) {
+  async writeFile(sandboxId, filePath, content, signal) {
     const relativePath = encodeFilePath(filePath);
     await this.#request(`v1/sandbox/${encodeURIComponent(sandboxId)}/file/${relativePath}`, {
       method: "PUT",
       headers: { "Content-Type": "application/octet-stream" },
-      body: typeof content === "string" ? content : new Uint8Array(content).buffer
+      body: typeof content === "string" ? content : new Uint8Array(content).buffer,
+      ...signal ? { signal } : {}
     });
   }
   async exec(sandboxId, argv, options = {}) {
+    const commandTimeoutMs = options.timeoutMs ?? 12e4;
     const response = await this.#request(`v1/sandbox/${encodeURIComponent(sandboxId)}/exec`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         argv,
         cwd: options.cwd ?? "/workspace/repo",
-        timeout_ms: options.timeoutMs ?? 12e4
-      })
+        timeout_ms: commandTimeoutMs
+      }),
+      ...options.signal ? { signal: options.signal } : {},
+      timeoutMs: commandTimeoutMs + EXEC_REQUEST_GRACE_MS
     });
     return parseExecSse(await response.text(), options.maxOutputChars);
   }

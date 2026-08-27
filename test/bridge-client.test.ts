@@ -41,6 +41,29 @@ describe('parseExecSse', () => {
 });
 
 describe('SandboxBridgeClient', () => {
+  it('cancels requests when the caller stops waiting', async () => {
+    const server = createServer(() => {});
+    server.listen(0);
+    await once(server, 'listening');
+
+    try {
+      const address = server.address();
+      assert.ok(address && typeof address === 'object');
+      const client = new SandboxBridgeClient(`http://localhost:${address.port}`, 'bridge-token');
+      const controller = new AbortController();
+      setTimeout(() => controller.abort(), 10);
+
+      await assert.rejects(
+        client.exec('sandbox-id', ['true'], { signal: controller.signal }),
+        /aborted/i,
+      );
+    } finally {
+      server.closeAllConnections();
+      server.close();
+      await once(server, 'close');
+    }
+  });
+
   it('uploads archive parts without converting their bytes to text', async () => {
     const received: Buffer[] = [];
     let requestHeaders: {

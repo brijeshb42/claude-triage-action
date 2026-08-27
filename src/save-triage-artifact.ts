@@ -2,7 +2,11 @@
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import * as path from 'node:path';
 import { TRIAGE_ARTIFACT_SCHEMA_VERSION, TRIAGE_ELIGIBILITY_DAYS } from './triage-artifact.js';
-import { selectTriageResult } from './triage-result.js';
+import {
+  formatTriageLogLine,
+  formatTriageStepSummary,
+  selectTriageResult,
+} from './triage-result.js';
 
 function requiredEnvironment(name: string): string {
   const value = process.env[name];
@@ -56,6 +60,11 @@ await writeFile(
   JSON.stringify(manifest, null, 2),
 );
 await writeFile(path.join(outputDirectory, 'triage-result.json'), JSON.stringify(result, null, 2));
+
+console.log(formatTriageLogLine(result));
+if (process.env.GITHUB_STEP_SUMMARY) {
+  await writeFile(process.env.GITHUB_STEP_SUMMARY, formatTriageStepSummary(result), { flag: 'a' });
+}
 
 if (process.env.GITHUB_OUTPUT) {
   await writeFile(

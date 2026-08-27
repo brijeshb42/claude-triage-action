@@ -30,6 +30,7 @@ const artifact = validateTriageArtifact(manifestValue, issueContextValue, result
   workflowPath:
     process.env.EXPECTED_WORKFLOW_PATH ||
     workflowPathFromRef(requiredEnvironment('EXPECTED_WORKFLOW_REF')),
+  allowFailedResult: process.env.ALLOW_FAILED_RESULT === 'true',
 });
 
 if (process.env.GITHUB_OUTPUT) {

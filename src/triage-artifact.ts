@@ -43,6 +43,7 @@ export interface ExpectedTriageArtifact {
   sourceRunId: number;
   defaultBranch: string;
   workflowPath: string;
+  allowFailedResult?: boolean;
   now?: Date;
 }
 
@@ -176,7 +177,7 @@ export function validateTriageArtifact(
   if (workflowPathFromRef(manifest.workflowRef) !== expected.workflowPath) {
     throw new Error('The triage artifact was created by a different workflow.');
   }
-  if (result.status !== 'completed') {
+  if (result.status !== 'completed' && expected.allowFailedResult !== true) {
     throw new Error('The triage artifact records an incomplete model run.');
   }
 

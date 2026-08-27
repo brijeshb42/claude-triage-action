@@ -129,4 +129,17 @@ describe('validateTriageArtifact', () => {
       /incomplete model run/,
     );
   });
+
+  it('allows a trusted reporter to classify failed model output', () => {
+    const artifact = createArtifact();
+    const failedResult = { ...artifact.result, status: 'failed' } as const;
+
+    assert.equal(
+      validateTriageArtifact(artifact.manifest, artifact.issueContext, failedResult, {
+        ...expected,
+        allowFailedResult: true,
+      }).result.status,
+      'failed',
+    );
+  });
 });

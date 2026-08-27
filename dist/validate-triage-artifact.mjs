@@ -94,7 +94,7 @@ function validateTriageArtifact(manifestValue2, issueContextValue2, resultValue2
   if (workflowPathFromRef(manifest.workflowRef) !== expected.workflowPath) {
     throw new Error("The triage artifact was created by a different workflow.");
   }
-  if (result.status !== "completed") {
+  if (result.status !== "completed" && expected.allowFailedResult !== true) {
     throw new Error("The triage artifact records an incomplete model run.");
   }
   return { manifest, issueContext, result };
@@ -124,7 +124,8 @@ var artifact = validateTriageArtifact(manifestValue, issueContextValue, resultVa
   issueNumber: Number(requiredEnvironment("EXPECTED_ISSUE_NUMBER")),
   sourceRunId: Number(requiredEnvironment("EXPECTED_SOURCE_RUN_ID")),
   defaultBranch: requiredEnvironment("EXPECTED_DEFAULT_BRANCH"),
-  workflowPath: process.env.EXPECTED_WORKFLOW_PATH || workflowPathFromRef(requiredEnvironment("EXPECTED_WORKFLOW_REF"))
+  workflowPath: process.env.EXPECTED_WORKFLOW_PATH || workflowPathFromRef(requiredEnvironment("EXPECTED_WORKFLOW_REF")),
+  allowFailedResult: process.env.ALLOW_FAILED_RESULT === "true"
 });
 if (process.env.GITHUB_OUTPUT) {
   await writeFile(

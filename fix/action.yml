@@ -218,6 +218,7 @@ runs:
 
     - name: Attempt the triaged fix
       id: claude
+      continue-on-error: true
       uses: anthropics/claude-code-action@c81e3bc69d1b18badbb63ba39581218f02421678 # v1.0.201
       env:
         CLAUDE_BYTE_STREAM_IDLE_TIMEOUT_MS: ${{ inputs.claude-stream-idle-timeout-ms }}

@@ -37,6 +37,7 @@ runs:
     - name: Validate the durable triage artifact
       shell: bash
       env:
+        ALLOW_FAILED_RESULT: 'true'
         ARTIFACT_DIRECTORY: ${{ runner.temp }}/claude-triage-report
         EXPECTED_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
         EXPECTED_ISSUE_NUMBER: ${{ inputs.issue-number }}

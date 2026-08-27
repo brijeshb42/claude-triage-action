@@ -1642,7 +1642,9 @@ async function prepareNodeRuntime(client, sandboxId, repositoryDirectory, reques
 
 // src/sandbox-cli.ts
 var HYDRATE_ATTEMPTS = 3;
-var HYDRATE_STAGING_DIRECTORY = "/workspace/.claude-triage-hydrate";
+var HYDRATE_ARCHIVE_PATH = "/workspace/.claude-triage-repository.tar.gz";
+var HYDRATE_BOOTSTRAP_PATH = "/workspace/.claude-triage-bootstrap";
+var HYDRATE_PART_PREFIX = "/workspace/.claude-triage-part-";
 async function delay(milliseconds) {
   await new Promise((resolve2) => {
     setTimeout(resolve2, milliseconds);
@@ -1672,22 +1674,11 @@ async function initializeRepository(client, sandboxId) {
   }
 }
 async function hydrateRepositoryArchive(client, sandboxId, archive) {
-  const prepareResult = await client.exec(
-    sandboxId,
-    [
-      "bash",
-      "-lc",
-      `mkdir -p '${HYDRATE_STAGING_DIRECTORY}' && find '${HYDRATE_STAGING_DIRECTORY}' -mindepth 1 -maxdepth 1 -type f -delete`
-    ],
-    { timeoutMs: 12e4 }
-  );
-  if (prepareResult.exitCode !== 0) {
-    throw new Error(`Could not prepare archive staging: ${prepareResult.stderr}`);
-  }
+  await client.writeFile(sandboxId, HYDRATE_BOOTSTRAP_PATH, "ready");
   let uploadedParts = 0;
   for await (const part of readArchiveParts(archive.path, archive.partBytes)) {
-    const partName = `part-${String(part.index).padStart(6, "0")}`;
-    await client.writeFile(sandboxId, `${HYDRATE_STAGING_DIRECTORY}/${partName}`, part.bytes);
+    const partName = String(part.index).padStart(6, "0");
+    await client.writeFile(sandboxId, `${HYDRATE_PART_PREFIX}${partName}`, part.bytes);
     uploadedParts += 1;
     process.stderr.write(
       `Uploaded archive part ${uploadedParts}/${archive.partCount} (${part.bytes.byteLength} bytes).
@@ -1697,7 +1688,6 @@ async function hydrateRepositoryArchive(client, sandboxId, archive) {
   if (uploadedParts !== archive.partCount) {
     throw new Error(`Uploaded ${uploadedParts} archive parts; expected ${archive.partCount}.`);
   }
-  const assembledArchive = `${HYDRATE_STAGING_DIRECTORY}/repository.tar.gz`;
   const extractResult = await client.exec(
     sandboxId,
     [
@@ -1705,12 +1695,11 @@ async function hydrateRepositoryArchive(client, sandboxId, archive) {
       "-lc",
       [
         "set -euo pipefail",
-        `cat '${HYDRATE_STAGING_DIRECTORY}'/part-* > '${assembledArchive}'`,
-        `printf '%s  %s\\n' '${archive.sha256}' '${assembledArchive}' | sha256sum --check --status`,
+        `cat '${HYDRATE_PART_PREFIX}'* > '${HYDRATE_ARCHIVE_PATH}'`,
+        `printf '%s  %s\\n' '${archive.sha256}' '${HYDRATE_ARCHIVE_PATH}' | sha256sum --check --status`,
         "mkdir -p '/workspace'",
-        `tar --extract --gzip --file '${assembledArchive}' --directory '/workspace'`,
-        `rm -f '${HYDRATE_STAGING_DIRECTORY}'/part-* '${assembledArchive}'`,
-        `rmdir '${HYDRATE_STAGING_DIRECTORY}'`
+        `tar --extract --gzip --file '${HYDRATE_ARCHIVE_PATH}' --directory '/workspace'`,
+        `rm -f '${HYDRATE_PART_PREFIX}'* '${HYDRATE_ARCHIVE_PATH}' '${HYDRATE_BOOTSTRAP_PATH}'`
       ].join("\n")
     ],
     { timeoutMs: 3e5 }
@@ -1752,7 +1741,7 @@ async function main() {
             throw error;
           }
           process.stderr.write(
-            `Hydration attempt ${attempt}/${HYDRATE_ATTEMPTS} failed; restarting all parts.
+            `Hydration attempt ${attempt}/${HYDRATE_ATTEMPTS} failed: ${error instanceof Error ? error.message : String(error)}; restarting all parts.
 `
           );
           await delay(1e3 * 2 ** (attempt - 1));

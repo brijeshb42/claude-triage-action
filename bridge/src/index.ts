@@ -1,10 +1,28 @@
-import { bridge } from '@cloudflare/sandbox/bridge';
+import { getSandboxBridgeAdapter } from './adapters/registry';
 
 export { Sandbox } from '@cloudflare/sandbox';
 export { WarmPool } from '@cloudflare/sandbox/bridge';
 
-export default bridge({
-  async fetch(): Promise<Response> {
-    return new Response('Claude triage Sandbox Bridge');
+function providerError(error: unknown): Response {
+  return Response.json(
+    {
+      error: error instanceof Error ? error.message : String(error),
+      code: 'sandbox_provider_unavailable',
+    },
+    { status: 503 },
+  );
+}
+
+export default {
+  async fetch(request, environment, context): Promise<Response> {
+    try {
+      return await getSandboxBridgeAdapter(environment).fetch(request, environment, context);
+    } catch (error) {
+      return providerError(error);
+    }
   },
-});
+  async scheduled(controller, environment, context): Promise<void> {
+    const adapter = getSandboxBridgeAdapter(environment);
+    await adapter.scheduled?.(controller, environment, context);
+  },
+} satisfies ExportedHandler<Env>;

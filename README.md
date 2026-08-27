@@ -14,9 +14,14 @@ The repository contains these reusable pieces:
 - `action.yml`: the temporary compatibility action for the original combined flow.
 - `dist/` and `plugin/`: bundled helpers and the read-only/fix CI skills.
 - `bridge/`: a lightly customized deployment of Cloudflare's supported Sandbox Bridge.
+- `docs/sandbox-providers.md`: provider contract, normalized cost model, and migration triggers.
 
 Claude Code and Anthropic federation remain on the GitHub-hosted runner. The sandbox
 receives a tracked source snapshot but no Anthropic or GitHub credentials.
+
+The Bridge is provider-adapted behind the existing `/v1/sandbox` HTTP contract. The current
+deployment sets `SANDBOX_PROVIDER=cloudflare`; adding another adapter does not change action,
+CLI, or MCP usage. Provider SDK credentials belong only in the Bridge deployment.
 
 Large tracked snapshots are compressed as one `tar.gz`, streamed to the Bridge as fixed
 16 MiB binary parts, reassembled with SHA-256 verification, and extracted once inside the

@@ -9,6 +9,32 @@ const reporterPath = new URL('../report/action.yml', import.meta.url);
 const triageActionPath = new URL('../triage/action.yml', import.meta.url);
 
 describe('triage action isolation', () => {
+  it('provides valid JSON schemas to Claude', async () => {
+    const actionFiles = [actionPath, fixActionPath, triageActionPath];
+
+    for (const actionFile of actionFiles) {
+      const action = await readFile(actionFile, 'utf8');
+      const schema = action.match(/^\s+--json-schema '(.+)'$/m)?.[1];
+
+      assert.ok(schema, `Expected ${actionFile.pathname} to contain a JSON schema`);
+      assert.doesNotThrow(() => JSON.parse(schema));
+    }
+  });
+
+  it('reports Claude failures after preserving diagnostic artifacts', async () => {
+    const actionFiles = [actionPath, fixActionPath, triageActionPath];
+
+    for (const actionFile of actionFiles) {
+      const action = await readFile(actionFile, 'utf8');
+
+      assert.match(action, /if: always\(\) && steps\.claude\.outcome == 'failure'/);
+      assert.match(
+        action,
+        /- name: Fail when Claude did not complete\n\s+if:.*\n\s+shell: bash\n\s+run: exit 1/,
+      );
+    }
+  });
+
   it('is a runner-agnostic composite action', async () => {
     const action = await readFile(actionPath, 'utf8');
 

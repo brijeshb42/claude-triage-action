@@ -243,3 +243,8 @@ runs:
           ${{ runner.temp }}/claude-triage.patch
         if-no-files-found: error
         retention-days: 1
+
+    - name: Fail when Claude did not complete
+      if: always() && steps.claude.outcome == 'failure'
+      shell: bash
+      run: exit 1

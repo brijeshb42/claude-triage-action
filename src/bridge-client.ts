@@ -164,13 +164,6 @@ export class SandboxBridgeClient {
     await this.#request(`v1/sandbox/${encodeURIComponent(sandboxId)}`, { method: 'DELETE' });
   }
 
-  async hydrate(sandboxId: string, archive: Uint8Array): Promise<void> {
-    await this.#request(`v1/sandbox/${encodeURIComponent(sandboxId)}/hydrate`, {
-      method: 'POST',
-      body: new Uint8Array(archive).buffer,
-    });
-  }
-
   async readFile(sandboxId: string, filePath: string): Promise<string> {
     const relativePath = encodeFilePath(filePath);
     const response = await this.#request(
@@ -179,11 +172,16 @@ export class SandboxBridgeClient {
     return response.text();
   }
 
-  async writeFile(sandboxId: string, filePath: string, content: string): Promise<void> {
+  async writeFile(
+    sandboxId: string,
+    filePath: string,
+    content: string | Uint8Array,
+  ): Promise<void> {
     const relativePath = encodeFilePath(filePath);
     await this.#request(`v1/sandbox/${encodeURIComponent(sandboxId)}/file/${relativePath}`, {
       method: 'PUT',
-      body: content,
+      headers: { 'Content-Type': 'application/octet-stream' },
+      body: typeof content === 'string' ? content : new Uint8Array(content).buffer,
     });
   }
 

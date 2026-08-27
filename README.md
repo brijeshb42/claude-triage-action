@@ -14,6 +14,10 @@ The repository contains three pieces:
 Claude Code and Anthropic federation remain on the GitHub-hosted runner. The sandbox
 receives a tracked source snapshot but no Anthropic or GitHub credentials.
 
+Large tracked snapshots are compressed as one `tar.gz`, streamed to the Bridge as fixed
+4 MiB binary parts, reassembled with SHA-256 verification, and extracted once inside the
+sandbox. A failed upload restarts the complete staging transaction.
+
 Claude can use only the trusted `mui-triage-ci` skill and the explicitly listed `sandbox`
 MCP tools. Unlisted tool calls are denied, and native filesystem, shell, web, task,
 worktree, messaging, and scheduling tools are removed from its context. All repository

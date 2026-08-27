@@ -1185,46 +1185,19 @@ var require_valid = __commonJS({
 });
 
 // src/sandbox-cli.ts
-import { readFile as readFile3, writeFile } from "node:fs/promises";
+import { readFile as readFile2, writeFile } from "node:fs/promises";
 import * as path3 from "node:path";
 
 // src/archive.ts
 import { execFile, spawn } from "node:child_process";
-import { lstat, mkdtemp, readFile, rm, stat, symlink } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { createReadStream } from "node:fs";
+import { lstat, mkdtemp, open, rm, stat, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import * as path from "node:path";
 import { promisify } from "node:util";
 var execFileAsync = promisify(execFile);
-var TARGET_CHUNK_BYTES = 8 * 1024 * 1024;
-var MAX_ARCHIVE_BYTES = 32 * 1024 * 1024;
-function estimatedTarBytes(file) {
-  const contentBlocks = Math.ceil(file.size / 512) * 512;
-  return contentBlocks + 1536;
-}
-function planArchiveChunks(files, targetBytes = TARGET_CHUNK_BYTES) {
-  const chunks = [];
-  let current = [];
-  let currentBytes = 1024;
-  for (const file of files) {
-    const estimate = estimatedTarBytes(file);
-    if (estimate > MAX_ARCHIVE_BYTES) {
-      throw new Error(
-        `Tracked file ${JSON.stringify(file.name)} is too large for Bridge hydration (${file.size} bytes).`
-      );
-    }
-    if (current.length > 0 && currentBytes + estimate > targetBytes) {
-      chunks.push(current);
-      current = [];
-      currentBytes = 1024;
-    }
-    current.push(file);
-    currentBytes += estimate;
-  }
-  if (current.length > 0) {
-    chunks.push(current);
-  }
-  return chunks;
-}
+var DEFAULT_ARCHIVE_PART_BYTES = 4 * 1024 * 1024;
 async function trackedFiles(repositoryDirectory) {
   const { stdout } = await execFileAsync("git", ["ls-files", "-z"], {
     cwd: repositoryDirectory,
@@ -1240,7 +1213,7 @@ async function trackedFiles(repositoryDirectory) {
           `Tracked path ${JSON.stringify(name)} is a directory. Git submodules are not supported yet.`
         );
       }
-      return { name, size: metadata.size };
+      return { name };
     })
   );
 }
@@ -1262,27 +1235,58 @@ async function createTar(archiveSourceDirectory, destination, files) {
     tarProcess.stdin.end(`${files.map((file) => `repo/${file.name}`).join("\0")}\0`);
   });
 }
-async function createArchiveChunks(repositoryDirectory) {
+async function sha256File(filePath) {
+  const hash = createHash("sha256");
+  for await (const chunk of createReadStream(filePath)) {
+    hash.update(chunk);
+  }
+  return hash.digest("hex");
+}
+async function createRepositoryArchive(repositoryDirectory, partBytes = DEFAULT_ARCHIVE_PART_BYTES) {
+  if (!Number.isSafeInteger(partBytes) || partBytes <= 0) {
+    throw new Error("Archive part size must be a positive safe integer.");
+  }
   const files = await trackedFiles(repositoryDirectory);
-  const plans = planArchiveChunks(files);
-  const temporaryDirectory = await mkdtemp(path.join(tmpdir(), "claude-triage-archives-"));
+  const temporaryDirectory = await mkdtemp(path.join(tmpdir(), "claude-triage-archive-"));
+  const archivePath = path.join(temporaryDirectory, "repository.tar.gz");
   try {
     await symlink(repositoryDirectory, path.join(temporaryDirectory, "repo"), "dir");
-    const chunks = [];
-    for (const [index, plannedFiles] of plans.entries()) {
-      const archivePath = path.join(temporaryDirectory, `chunk-${index}.tar.gz`);
-      await createTar(temporaryDirectory, archivePath, plannedFiles);
-      const archiveStats = await stat(archivePath);
-      if (archiveStats.size > MAX_ARCHIVE_BYTES) {
-        throw new Error(
-          `Archive chunk ${index + 1} exceeded the Bridge limit (${archiveStats.size} bytes).`
-        );
+    await createTar(temporaryDirectory, archivePath, files);
+    const archiveStats = await stat(archivePath);
+    return {
+      path: archivePath,
+      byteLength: archiveStats.size,
+      fileCount: files.length,
+      partBytes,
+      partCount: Math.ceil(archiveStats.size / partBytes),
+      sha256: await sha256File(archivePath),
+      dispose: async () => {
+        await rm(temporaryDirectory, { recursive: true, force: true });
       }
-      chunks.push({ bytes: await readFile(archivePath), fileCount: plannedFiles.length });
-    }
-    return chunks;
-  } finally {
+    };
+  } catch (error) {
     await rm(temporaryDirectory, { recursive: true, force: true });
+    throw error;
+  }
+}
+async function* readArchiveParts(archivePath, partBytes = DEFAULT_ARCHIVE_PART_BYTES) {
+  if (!Number.isSafeInteger(partBytes) || partBytes <= 0) {
+    throw new Error("Archive part size must be a positive safe integer.");
+  }
+  const archive = await open(archivePath, "r");
+  let index = 0;
+  try {
+    while (true) {
+      const buffer = Buffer.allocUnsafe(partBytes);
+      const { bytesRead } = await archive.read(buffer, 0, buffer.length, null);
+      if (bytesRead === 0) {
+        break;
+      }
+      yield { bytes: buffer.subarray(0, bytesRead), index };
+      index += 1;
+    }
+  } finally {
+    await archive.close();
   }
 }
 
@@ -1389,12 +1393,6 @@ var SandboxBridgeClient = class {
   async destroy(sandboxId) {
     await this.#request(`v1/sandbox/${encodeURIComponent(sandboxId)}`, { method: "DELETE" });
   }
-  async hydrate(sandboxId, archive) {
-    await this.#request(`v1/sandbox/${encodeURIComponent(sandboxId)}/hydrate`, {
-      method: "POST",
-      body: new Uint8Array(archive).buffer
-    });
-  }
   async readFile(sandboxId, filePath) {
     const relativePath = encodeFilePath(filePath);
     const response = await this.#request(
@@ -1406,7 +1404,8 @@ var SandboxBridgeClient = class {
     const relativePath = encodeFilePath(filePath);
     await this.#request(`v1/sandbox/${encodeURIComponent(sandboxId)}/file/${relativePath}`, {
       method: "PUT",
-      body: content
+      headers: { "Content-Type": "application/octet-stream" },
+      body: typeof content === "string" ? content : new Uint8Array(content).buffer
     });
   }
   async exec(sandboxId, argv, options = {}) {
@@ -1442,7 +1441,7 @@ function loadBridgeEnvironment() {
 var import_compare = __toESM(require_compare(), 1);
 var import_satisfies = __toESM(require_satisfies(), 1);
 var import_valid = __toESM(require_valid(), 1);
-import { lstat as lstat2, readFile as readFile2 } from "node:fs/promises";
+import { lstat as lstat2, readFile } from "node:fs/promises";
 import * as path2 from "node:path";
 
 // src/node-command.ts
@@ -1532,7 +1531,7 @@ async function readOptionalRegularFile(filePath) {
     if (stats.size > 1024 * 1024) {
       throw new Error(`${filePath} is too large to use as Node.js configuration.`);
     }
-    return await readFile2(filePath, "utf8");
+    return await readFile(filePath, "utf8");
   } catch (error) {
     if (typeof error === "object" && error !== null && "code" in error && error.code === "ENOENT") {
       return void 0;
@@ -1643,6 +1642,7 @@ async function prepareNodeRuntime(client, sandboxId, repositoryDirectory, reques
 
 // src/sandbox-cli.ts
 var HYDRATE_ATTEMPTS = 3;
+var HYDRATE_STAGING_DIRECTORY = "/workspace/.claude-triage-hydrate";
 async function delay(milliseconds) {
   await new Promise((resolve2) => {
     setTimeout(resolve2, milliseconds);
@@ -1671,6 +1671,56 @@ async function initializeRepository(client, sandboxId) {
     }
   }
 }
+async function hydrateRepositoryArchive(client, sandboxId, archive) {
+  const prepareResult = await client.exec(
+    sandboxId,
+    [
+      "bash",
+      "-lc",
+      `mkdir -p '${HYDRATE_STAGING_DIRECTORY}' && find '${HYDRATE_STAGING_DIRECTORY}' -mindepth 1 -maxdepth 1 -type f -delete`
+    ],
+    { timeoutMs: 12e4 }
+  );
+  if (prepareResult.exitCode !== 0) {
+    throw new Error(`Could not prepare archive staging: ${prepareResult.stderr}`);
+  }
+  let uploadedParts = 0;
+  for await (const part of readArchiveParts(archive.path, archive.partBytes)) {
+    const partName = `part-${String(part.index).padStart(6, "0")}`;
+    await client.writeFile(sandboxId, `${HYDRATE_STAGING_DIRECTORY}/${partName}`, part.bytes);
+    uploadedParts += 1;
+    process.stderr.write(
+      `Uploaded archive part ${uploadedParts}/${archive.partCount} (${part.bytes.byteLength} bytes).
+`
+    );
+  }
+  if (uploadedParts !== archive.partCount) {
+    throw new Error(`Uploaded ${uploadedParts} archive parts; expected ${archive.partCount}.`);
+  }
+  const assembledArchive = `${HYDRATE_STAGING_DIRECTORY}/repository.tar.gz`;
+  const extractResult = await client.exec(
+    sandboxId,
+    [
+      "bash",
+      "-lc",
+      [
+        "set -euo pipefail",
+        `cat '${HYDRATE_STAGING_DIRECTORY}'/part-* > '${assembledArchive}'`,
+        `printf '%s  %s\\n' '${archive.sha256}' '${assembledArchive}' | sha256sum --check --status`,
+        "mkdir -p '/workspace'",
+        `tar --extract --gzip --file '${assembledArchive}' --directory '/workspace'`,
+        `rm -f '${HYDRATE_STAGING_DIRECTORY}'/part-* '${assembledArchive}'`,
+        `rmdir '${HYDRATE_STAGING_DIRECTORY}'`
+      ].join("\n")
+    ],
+    { timeoutMs: 3e5 }
+  );
+  if (extractResult.exitCode !== 0) {
+    throw new Error(
+      `Could not verify and extract the repository archive: ${extractResult.stderr || extractResult.stdout}`
+    );
+  }
+}
 async function main() {
   const [command, ...args] = process.argv.slice(2);
   const bridge = loadBridgeEnvironment();
@@ -1687,34 +1737,33 @@ async function main() {
   if (command === "hydrate-worktree") {
     const sandboxId = requiredArgument(args[0], "sandbox ID");
     const repositoryDirectory = path3.resolve(requiredArgument(args[1], "repository directory"));
-    const chunks = await createArchiveChunks(repositoryDirectory);
-    let uploadedFiles = 0;
-    for (let attempt = 1; attempt <= HYDRATE_ATTEMPTS; attempt += 1) {
-      uploadedFiles = 0;
-      try {
-        for (const [index, chunk] of chunks.entries()) {
-          await client.hydrate(sandboxId, chunk.bytes);
-          uploadedFiles += chunk.fileCount;
+    const archive = await createRepositoryArchive(repositoryDirectory);
+    try {
+      process.stderr.write(
+        `Created ${archive.byteLength}-byte repository archive with ${archive.fileCount} tracked files in ${archive.partCount} parts.
+`
+      );
+      for (let attempt = 1; attempt <= HYDRATE_ATTEMPTS; attempt += 1) {
+        try {
+          await hydrateRepositoryArchive(client, sandboxId, archive);
+          break;
+        } catch (error) {
+          if (attempt === HYDRATE_ATTEMPTS) {
+            throw error;
+          }
           process.stderr.write(
-            `Hydrated chunk ${index + 1}/${chunks.length} (${chunk.fileCount} tracked files).
+            `Hydration attempt ${attempt}/${HYDRATE_ATTEMPTS} failed; restarting all parts.
 `
           );
+          await delay(1e3 * 2 ** (attempt - 1));
         }
-        break;
-      } catch (error) {
-        if (attempt === HYDRATE_ATTEMPTS) {
-          throw error;
-        }
-        process.stderr.write(
-          `Hydration attempt ${attempt}/${HYDRATE_ATTEMPTS} failed; restarting all chunks.
-`
-        );
-        await delay(1e3 * 2 ** (attempt - 1));
       }
+    } finally {
+      await archive.dispose();
     }
     await initializeRepository(client, sandboxId);
     process.stderr.write(
-      `Hydrated ${uploadedFiles} tracked files and created a baseline commit.
+      `Hydrated ${archive.fileCount} tracked files and created a baseline commit.
 `
     );
     return;
@@ -1762,7 +1811,7 @@ async function main() {
   if (command === "upload-issue-context") {
     const sandboxId = requiredArgument(args[0], "sandbox ID");
     const inputPath = path3.resolve(requiredArgument(args[1], "issue context path"));
-    await client.writeFile(sandboxId, "/workspace/issue.json", await readFile3(inputPath, "utf8"));
+    await client.writeFile(sandboxId, "/workspace/issue.json", await readFile2(inputPath, "utf8"));
     return;
   }
   if (command === "mcp-config") {

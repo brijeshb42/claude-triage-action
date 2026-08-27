@@ -31375,12 +31375,6 @@ var SandboxBridgeClient = class {
   async destroy(sandboxId) {
     await this.#request(`v1/sandbox/${encodeURIComponent(sandboxId)}`, { method: "DELETE" });
   }
-  async hydrate(sandboxId, archive) {
-    await this.#request(`v1/sandbox/${encodeURIComponent(sandboxId)}/hydrate`, {
-      method: "POST",
-      body: new Uint8Array(archive).buffer
-    });
-  }
   async readFile(sandboxId, filePath) {
     const relativePath = encodeFilePath(filePath);
     const response = await this.#request(
@@ -31392,7 +31386,8 @@ var SandboxBridgeClient = class {
     const relativePath = encodeFilePath(filePath);
     await this.#request(`v1/sandbox/${encodeURIComponent(sandboxId)}/file/${relativePath}`, {
       method: "PUT",
-      body: content
+      headers: { "Content-Type": "application/octet-stream" },
+      body: typeof content === "string" ? content : new Uint8Array(content).buffer
     });
   }
   async exec(sandboxId, argv, options = {}) {

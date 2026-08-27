@@ -1,32 +1,39 @@
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import * as path from 'node:path';
 import { describe, it } from 'node:test';
 import { promisify } from 'node:util';
-import { createArchiveChunks, planArchiveChunks } from '../src/archive.js';
+import { createRepositoryArchive, readArchiveParts } from '../src/archive.js';
 
 const execFileAsync = promisify(execFile);
 
-describe('planArchiveChunks', () => {
-  it('splits repositories into bounded chunks while preserving every file', () => {
-    const files = Array.from({ length: 20 }, (_, index) => ({
-      name: `src/file-${index}.ts`,
-      size: 1_024,
-    }));
-    const chunks = planArchiveChunks(files, 8_000);
+describe('readArchiveParts', () => {
+  it('splits an archive into fixed-size byte ranges', async () => {
+    const temporaryDirectory = await mkdtemp(path.join(tmpdir(), 'claude-triage-parts-'));
 
-    assert.ok(chunks.length > 1);
-    assert.deepEqual(chunks.flat(), files);
-  });
+    try {
+      const archivePath = path.join(temporaryDirectory, 'archive.bin');
+      await writeFile(archivePath, '0123456789');
+      const parts: Buffer[] = [];
+      for await (const part of readArchiveParts(archivePath, 4)) {
+        assert.equal(part.index, parts.length);
+        parts.push(Buffer.from(part.bytes));
+      }
 
-  it('rejects a single file larger than the Bridge request limit', () => {
-    assert.throws(() => planArchiveChunks([{ name: 'large.bin', size: 33 * 1024 * 1024 }]));
+      assert.deepEqual(
+        parts.map((part) => part.toString()),
+        ['0123', '4567', '89'],
+      );
+    } finally {
+      await rm(temporaryDirectory, { recursive: true, force: true });
+    }
   });
 });
 
-describe('createArchiveChunks', () => {
+describe('createRepositoryArchive', () => {
   it('archives tracked files from a Git repository', async () => {
     const repositoryDirectory = await mkdtemp(path.join(tmpdir(), 'claude-triage-repository-'));
 
@@ -36,18 +43,25 @@ describe('createArchiveChunks', () => {
       await execFileAsync('git', ['init'], { cwd: repositoryDirectory });
       await execFileAsync('git', ['add', '.'], { cwd: repositoryDirectory });
 
-      const chunks = await createArchiveChunks(repositoryDirectory);
+      const archive = await createRepositoryArchive(repositoryDirectory, 16);
+      try {
+        assert.equal(archive.fileCount, 1);
+        assert.equal(archive.partCount, Math.ceil(archive.byteLength / 16));
+        assert.match(archive.sha256, /^[a-f0-9]{64}$/);
 
-      assert.equal(chunks.length, 1);
-      const [chunk] = chunks;
-      assert.ok(chunk);
-      assert.equal(chunk.fileCount, 1);
-      assert.ok(chunk.bytes.length > 0);
-
-      const archivePath = path.join(repositoryDirectory, 'archive.tar.gz');
-      await writeFile(archivePath, chunk.bytes);
-      const { stdout } = await execFileAsync('tar', ['--list', '--file', archivePath]);
-      assert.equal(stdout.trim(), 'repo/src/file with spaces.ts');
+        const parts: Buffer[] = [];
+        for await (const part of readArchiveParts(archive.path, archive.partBytes)) {
+          parts.push(Buffer.from(part.bytes));
+        }
+        const reconstructed = Buffer.concat(parts);
+        assert.equal(createHash('sha256').update(reconstructed).digest('hex'), archive.sha256);
+        const reconstructedPath = path.join(repositoryDirectory, 'archive.tar.gz');
+        await writeFile(reconstructedPath, reconstructed);
+        const { stdout } = await execFileAsync('tar', ['--list', '--file', reconstructedPath]);
+        assert.equal(stdout.trim(), 'repo/src/file with spaces.ts');
+      } finally {
+        await archive.dispose();
+      }
     } finally {
       await rm(repositoryDirectory, { recursive: true, force: true });
     }
@@ -62,10 +76,12 @@ describe('createArchiveChunks', () => {
       await execFileAsync('git', ['init'], { cwd: repositoryDirectory });
       await execFileAsync('git', ['add', '.'], { cwd: repositoryDirectory });
 
-      const [chunk] = await createArchiveChunks(repositoryDirectory);
-
-      assert.ok(chunk);
-      assert.ok(chunk.bytes.length < Buffer.byteLength(content) / 10);
+      const archive = await createRepositoryArchive(repositoryDirectory);
+      try {
+        assert.ok(archive.byteLength < Buffer.byteLength(content) / 10);
+      } finally {
+        await archive.dispose();
+      }
     } finally {
       await rm(repositoryDirectory, { recursive: true, force: true });
     }

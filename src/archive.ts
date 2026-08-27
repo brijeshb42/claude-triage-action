@@ -1,57 +1,31 @@
 import { execFile, spawn } from 'node:child_process';
-import { lstat, mkdtemp, readFile, rm, stat, symlink } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
+import { createReadStream } from 'node:fs';
+import { lstat, mkdtemp, open, rm, stat, symlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import * as path from 'node:path';
 import { promisify } from 'node:util';
 
 const execFileAsync = promisify(execFile);
-// The Bridge accepts 32 MiB requests, but it base64-encodes hydrate payloads before
-// forwarding them to the container. Keep the uncompressed plan substantially below
-// that ceiling to limit Worker and RPC memory pressure for large repositories.
-const TARGET_CHUNK_BYTES = 8 * 1024 * 1024;
-const MAX_ARCHIVE_BYTES = 32 * 1024 * 1024;
+const DEFAULT_ARCHIVE_PART_BYTES = 4 * 1024 * 1024;
 
 export interface TrackedFile {
   name: string;
-  size: number;
 }
 
-function estimatedTarBytes(file: TrackedFile): number {
-  const contentBlocks = Math.ceil(file.size / 512) * 512;
-  return contentBlocks + 1_536;
+export interface RepositoryArchive {
+  path: string;
+  byteLength: number;
+  fileCount: number;
+  partBytes: number;
+  partCount: number;
+  sha256: string;
+  dispose: () => Promise<void>;
 }
 
-export function planArchiveChunks(
-  files: TrackedFile[],
-  targetBytes = TARGET_CHUNK_BYTES,
-): TrackedFile[][] {
-  const chunks: TrackedFile[][] = [];
-  let current: TrackedFile[] = [];
-  let currentBytes = 1_024;
-
-  for (const file of files) {
-    const estimate = estimatedTarBytes(file);
-    if (estimate > MAX_ARCHIVE_BYTES) {
-      throw new Error(
-        `Tracked file ${JSON.stringify(file.name)} is too large for Bridge hydration ` +
-          `(${file.size} bytes).`,
-      );
-    }
-
-    if (current.length > 0 && currentBytes + estimate > targetBytes) {
-      chunks.push(current);
-      current = [];
-      currentBytes = 1_024;
-    }
-
-    current.push(file);
-    currentBytes += estimate;
-  }
-
-  if (current.length > 0) {
-    chunks.push(current);
-  }
-  return chunks;
+export interface ArchivePart {
+  bytes: Uint8Array;
+  index: number;
 }
 
 async function trackedFiles(repositoryDirectory: string): Promise<TrackedFile[]> {
@@ -73,7 +47,7 @@ async function trackedFiles(repositoryDirectory: string): Promise<TrackedFile[]>
           `Tracked path ${JSON.stringify(name)} is a directory. Git submodules are not supported yet.`,
         );
       }
-      return { name, size: metadata.size };
+      return { name };
     }),
   );
 }
@@ -101,32 +75,68 @@ async function createTar(
   });
 }
 
-export interface ArchiveChunk {
-  bytes: Uint8Array;
-  fileCount: number;
+async function sha256File(filePath: string): Promise<string> {
+  const hash = createHash('sha256');
+  for await (const chunk of createReadStream(filePath)) {
+    hash.update(chunk);
+  }
+  return hash.digest('hex');
 }
 
-export async function createArchiveChunks(repositoryDirectory: string): Promise<ArchiveChunk[]> {
+export async function createRepositoryArchive(
+  repositoryDirectory: string,
+  partBytes = DEFAULT_ARCHIVE_PART_BYTES,
+): Promise<RepositoryArchive> {
+  if (!Number.isSafeInteger(partBytes) || partBytes <= 0) {
+    throw new Error('Archive part size must be a positive safe integer.');
+  }
+
   const files = await trackedFiles(repositoryDirectory);
-  const plans = planArchiveChunks(files);
-  const temporaryDirectory = await mkdtemp(path.join(tmpdir(), 'claude-triage-archives-'));
+  const temporaryDirectory = await mkdtemp(path.join(tmpdir(), 'claude-triage-archive-'));
+  const archivePath = path.join(temporaryDirectory, 'repository.tar.gz');
 
   try {
     await symlink(repositoryDirectory, path.join(temporaryDirectory, 'repo'), 'dir');
-    const chunks: ArchiveChunk[] = [];
-    for (const [index, plannedFiles] of plans.entries()) {
-      const archivePath = path.join(temporaryDirectory, `chunk-${index}.tar.gz`);
-      await createTar(temporaryDirectory, archivePath, plannedFiles);
-      const archiveStats = await stat(archivePath);
-      if (archiveStats.size > MAX_ARCHIVE_BYTES) {
-        throw new Error(
-          `Archive chunk ${index + 1} exceeded the Bridge limit (${archiveStats.size} bytes).`,
-        );
-      }
-      chunks.push({ bytes: await readFile(archivePath), fileCount: plannedFiles.length });
-    }
-    return chunks;
-  } finally {
+    await createTar(temporaryDirectory, archivePath, files);
+    const archiveStats = await stat(archivePath);
+    return {
+      path: archivePath,
+      byteLength: archiveStats.size,
+      fileCount: files.length,
+      partBytes,
+      partCount: Math.ceil(archiveStats.size / partBytes),
+      sha256: await sha256File(archivePath),
+      dispose: async () => {
+        await rm(temporaryDirectory, { recursive: true, force: true });
+      },
+    };
+  } catch (error) {
     await rm(temporaryDirectory, { recursive: true, force: true });
+    throw error;
+  }
+}
+
+export async function* readArchiveParts(
+  archivePath: string,
+  partBytes = DEFAULT_ARCHIVE_PART_BYTES,
+): AsyncGenerator<ArchivePart> {
+  if (!Number.isSafeInteger(partBytes) || partBytes <= 0) {
+    throw new Error('Archive part size must be a positive safe integer.');
+  }
+
+  const archive = await open(archivePath, 'r');
+  let index = 0;
+  try {
+    while (true) {
+      const buffer = Buffer.allocUnsafe(partBytes);
+      const { bytesRead } = await archive.read(buffer, 0, buffer.length, null);
+      if (bytesRead === 0) {
+        break;
+      }
+      yield { bytes: buffer.subarray(0, bytesRead), index };
+      index += 1;
+    }
+  } finally {
+    await archive.close();
   }
 }

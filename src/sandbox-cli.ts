@@ -1,12 +1,13 @@
 #!/usr/bin/env node
 import { readFile, writeFile } from 'node:fs/promises';
 import * as path from 'node:path';
-import { createArchiveChunks } from './archive.js';
+import { createRepositoryArchive, readArchiveParts, type RepositoryArchive } from './archive.js';
 import { SandboxBridgeClient } from './bridge-client.js';
 import { loadBridgeEnvironment } from './config.js';
 import { prepareNodeRuntime } from './node-runtime.js';
 
 const HYDRATE_ATTEMPTS = 3;
+const HYDRATE_STAGING_DIRECTORY = '/workspace/.claude-triage-hydrate';
 
 async function delay(milliseconds: number): Promise<void> {
   await new Promise((resolve) => {
@@ -40,6 +41,65 @@ async function initializeRepository(client: SandboxBridgeClient, sandboxId: stri
   }
 }
 
+async function hydrateRepositoryArchive(
+  client: SandboxBridgeClient,
+  sandboxId: string,
+  archive: RepositoryArchive,
+): Promise<void> {
+  const prepareResult = await client.exec(
+    sandboxId,
+    [
+      'bash',
+      '-lc',
+      `mkdir -p '${HYDRATE_STAGING_DIRECTORY}' && ` +
+        `find '${HYDRATE_STAGING_DIRECTORY}' -mindepth 1 -maxdepth 1 -type f -delete`,
+    ],
+    { timeoutMs: 120_000 },
+  );
+  if (prepareResult.exitCode !== 0) {
+    throw new Error(`Could not prepare archive staging: ${prepareResult.stderr}`);
+  }
+
+  let uploadedParts = 0;
+  for await (const part of readArchiveParts(archive.path, archive.partBytes)) {
+    const partName = `part-${String(part.index).padStart(6, '0')}`;
+    await client.writeFile(sandboxId, `${HYDRATE_STAGING_DIRECTORY}/${partName}`, part.bytes);
+    uploadedParts += 1;
+    process.stderr.write(
+      `Uploaded archive part ${uploadedParts}/${archive.partCount} (${part.bytes.byteLength} bytes).\n`,
+    );
+  }
+
+  if (uploadedParts !== archive.partCount) {
+    throw new Error(`Uploaded ${uploadedParts} archive parts; expected ${archive.partCount}.`);
+  }
+
+  const assembledArchive = `${HYDRATE_STAGING_DIRECTORY}/repository.tar.gz`;
+  const extractResult = await client.exec(
+    sandboxId,
+    [
+      'bash',
+      '-lc',
+      [
+        'set -euo pipefail',
+        `cat '${HYDRATE_STAGING_DIRECTORY}'/part-* > '${assembledArchive}'`,
+        `printf '%s  %s\\n' '${archive.sha256}' '${assembledArchive}' | sha256sum --check --status`,
+        "mkdir -p '/workspace'",
+        `tar --extract --gzip --file '${assembledArchive}' --directory '/workspace'`,
+        `rm -f '${HYDRATE_STAGING_DIRECTORY}'/part-* '${assembledArchive}'`,
+        `rmdir '${HYDRATE_STAGING_DIRECTORY}'`,
+      ].join('\n'),
+    ],
+    { timeoutMs: 300_000 },
+  );
+  if (extractResult.exitCode !== 0) {
+    throw new Error(
+      `Could not verify and extract the repository archive: ` +
+        `${extractResult.stderr || extractResult.stdout}`,
+    );
+  }
+}
+
 async function main(): Promise<void> {
   const [command, ...args] = process.argv.slice(2);
   const bridge = loadBridgeEnvironment();
@@ -58,34 +118,33 @@ async function main(): Promise<void> {
   if (command === 'hydrate-worktree') {
     const sandboxId = requiredArgument(args[0], 'sandbox ID');
     const repositoryDirectory = path.resolve(requiredArgument(args[1], 'repository directory'));
-    const chunks = await createArchiveChunks(repositoryDirectory);
-    let uploadedFiles = 0;
-
-    for (let attempt = 1; attempt <= HYDRATE_ATTEMPTS; attempt += 1) {
-      uploadedFiles = 0;
-      try {
-        for (const [index, chunk] of chunks.entries()) {
-          await client.hydrate(sandboxId, chunk.bytes);
-          uploadedFiles += chunk.fileCount;
+    const archive = await createRepositoryArchive(repositoryDirectory);
+    try {
+      process.stderr.write(
+        `Created ${archive.byteLength}-byte repository archive with ${archive.fileCount} tracked ` +
+          `files in ${archive.partCount} parts.\n`,
+      );
+      for (let attempt = 1; attempt <= HYDRATE_ATTEMPTS; attempt += 1) {
+        try {
+          await hydrateRepositoryArchive(client, sandboxId, archive);
+          break;
+        } catch (error) {
+          if (attempt === HYDRATE_ATTEMPTS) {
+            throw error;
+          }
           process.stderr.write(
-            `Hydrated chunk ${index + 1}/${chunks.length} (${chunk.fileCount} tracked files).\n`,
+            `Hydration attempt ${attempt}/${HYDRATE_ATTEMPTS} failed; restarting all parts.\n`,
           );
+          await delay(1_000 * 2 ** (attempt - 1));
         }
-        break;
-      } catch (error) {
-        if (attempt === HYDRATE_ATTEMPTS) {
-          throw error;
-        }
-        process.stderr.write(
-          `Hydration attempt ${attempt}/${HYDRATE_ATTEMPTS} failed; restarting all chunks.\n`,
-        );
-        await delay(1_000 * 2 ** (attempt - 1));
       }
+    } finally {
+      await archive.dispose();
     }
 
     await initializeRepository(client, sandboxId);
     process.stderr.write(
-      `Hydrated ${uploadedFiles} tracked files and created a baseline commit.\n`,
+      `Hydrated ${archive.fileCount} tracked files and created a baseline commit.\n`,
     );
     return;
   }

@@ -102,9 +102,13 @@ describe('triage action isolation', () => {
 
     assert.match(publisher, /^runs:\n  using: composite$/m);
     assert.match(publisher, /Refusing agent change to protected path/);
+    assert.match(publisher, /git switch --detach FETCH_HEAD/);
+    assert.match(publisher, /github\.rest\.git\.createRef/);
+    assert.match(publisher, /git push origin "HEAD:refs\/heads\/\$branch"/);
     assert.match(publisher, /draft: true/);
     assert.doesNotMatch(publisher, /anthropic/i);
     assert.doesNotMatch(publisher, /SANDBOX_API_KEY/);
+    assert.doesNotMatch(publisher, /permission-workflows/);
   });
 
   it('keeps read-only triage on the runner without command or mutation tools', async () => {

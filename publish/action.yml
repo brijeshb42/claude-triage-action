@@ -43,6 +43,18 @@ runs:
         name: ${{ inputs.artifact-name }}
         path: ${{ runner.temp }}/claude-triage
 
+    - name: Resolve the current pull request base
+      id: base
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      env:
+        DEFAULT_BRANCH: ${{ inputs.default-branch }}
+      run: |
+        set -euo pipefail
+        git fetch --no-tags origin "refs/heads/$DEFAULT_BRANCH"
+        git switch --detach FETCH_HEAD
+        echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
     - name: Validate and stage the patch without executing repository code
       id: patch
       shell: bash
@@ -145,19 +157,41 @@ runs:
         appendFileSync(process.env.GITHUB_OUTPUT, `title=${title}\nmetadata-path=${metadataPath}\n`);
         NODE
 
+    - name: Create the remote branch at the validated base
+      id: remote-branch
+      if: steps.patch.outputs.has-changes == 'true'
+      uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+      env:
+        BASE_SHA: ${{ steps.base.outputs.sha }}
+        ISSUE_NUMBER: ${{ inputs.issue-number }}
+        RUN_ATTEMPT: ${{ github.run_attempt }}
+        RUN_ID: ${{ github.run_id }}
+      with:
+        github-token: ${{ inputs.github-token }}
+        script: |
+          const branch = `claude/triage-${process.env.ISSUE_NUMBER}-${process.env.RUN_ID}-${process.env.RUN_ATTEMPT}`;
+          await github.rest.git.createRef({
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            ref: `refs/heads/${branch}`,
+            sha: process.env.BASE_SHA,
+          });
+          core.setOutput('name', branch);
+
     - name: Commit and push the accepted patch
       id: branch
       if: steps.patch.outputs.has-changes == 'true'
       shell: bash
       working-directory: ${{ inputs.working-directory }}
       env:
+        BRANCH_NAME: ${{ steps.remote-branch.outputs.name }}
         ISSUE_NUMBER: ${{ inputs.issue-number }}
         PR_TITLE: ${{ steps.metadata.outputs.title }}
         PREVIEW_DIRECTORY: ${{ inputs.preview-directory }}
         PREVIEW_READY: ${{ steps.patch.outputs.preview-ready }}
       run: |
         set -euo pipefail
-        branch="claude/triage-${ISSUE_NUMBER}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+        branch="$BRANCH_NAME"
         git config user.name 'github-actions[bot]'
         git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
         git switch -c "$branch"
@@ -169,8 +203,25 @@ runs:
           git add --all -- "$PREVIEW_DIRECTORY"
           git -c core.hooksPath=/dev/null commit -m "docs: add triage preview for issue #${ISSUE_NUMBER}"
         fi
-        git push origin "$branch"
+        git push origin "HEAD:refs/heads/$branch"
         echo "name=$branch" >> "$GITHUB_OUTPUT"
+
+    - name: Remove an unmodified remote branch after a push failure
+      if: >-
+        always() &&
+        steps.remote-branch.outcome == 'success' &&
+        steps.branch.outcome == 'failure'
+      uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+      env:
+        BRANCH_NAME: ${{ steps.remote-branch.outputs.name }}
+      with:
+        github-token: ${{ inputs.github-token }}
+        script: |
+          await github.rest.git.deleteRef({
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            ref: `heads/${process.env.BRANCH_NAME}`,
+          });
 
     - name: Create draft pull request
       id: pr

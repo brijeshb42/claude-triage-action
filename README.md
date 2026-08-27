@@ -16,7 +16,8 @@ receives a tracked source snapshot but no Anthropic or GitHub credentials.
 
 Large tracked snapshots are compressed as one `tar.gz`, streamed to the Bridge as fixed
 4 MiB binary parts, reassembled with SHA-256 verification, and extracted once inside the
-sandbox. A failed upload restarts the complete staging transaction.
+sandbox. Each failed part is retried independently, and extraction retries reuse the uploaded
+parts.
 
 Claude can use only the trusted `mui-triage-ci` skill and the explicitly listed `sandbox`
 MCP tools. Unlisted tool calls are denied, and native filesystem, shell, web, task,

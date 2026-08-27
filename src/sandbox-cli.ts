@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { readFile, writeFile } from 'node:fs/promises';
 import * as path from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { createRepositoryArchive, readArchiveParts, type RepositoryArchive } from './archive.js';
 import { SandboxBridgeClient } from './bridge-client.js';
 import { loadBridgeEnvironment } from './config.js';
@@ -9,6 +10,7 @@ import { prepareNodeRuntime } from './node-runtime.js';
 const HYDRATE_ATTEMPTS = 3;
 const HYDRATE_ARCHIVE_PATH = '/workspace/.claude-triage-repository.tar.gz';
 const HYDRATE_BOOTSTRAP_PATH = '/workspace/.claude-triage-bootstrap';
+const HYDRATE_COMPLETE_PATH = '/workspace/.claude-triage-hydrated';
 const HYDRATE_PART_PREFIX = '/workspace/.claude-triage-part-';
 
 async function delay(milliseconds: number): Promise<void> {
@@ -43,18 +45,145 @@ async function initializeRepository(client: SandboxBridgeClient, sandboxId: stri
   }
 }
 
-async function hydrateRepositoryArchive(
+async function writeFileWithRetries(
+  client: SandboxBridgeClient,
+  sandboxId: string,
+  filePath: string,
+  content: string | Uint8Array,
+  description: string,
+): Promise<void> {
+  for (let attempt = 1; attempt <= HYDRATE_ATTEMPTS; attempt += 1) {
+    try {
+      await client.writeFile(sandboxId, filePath, content);
+      return;
+    } catch (error) {
+      if (attempt === HYDRATE_ATTEMPTS) {
+        throw error;
+      }
+      process.stderr.write(
+        `${description} attempt ${attempt}/${HYDRATE_ATTEMPTS} failed: ` +
+          `${error instanceof Error ? error.message : String(error)}; retrying this file.\n`,
+      );
+      await delay(1_000 * 2 ** (attempt - 1));
+    }
+  }
+}
+
+async function archiveWasExtracted(
+  client: SandboxBridgeClient,
+  sandboxId: string,
+  archiveSha256: string,
+): Promise<boolean> {
+  try {
+    return (await client.readFile(sandboxId, HYDRATE_COMPLETE_PATH)).trim() === archiveSha256;
+  } catch {
+    return false;
+  }
+}
+
+async function extractRepositoryArchive(
+  client: SandboxBridgeClient,
+  sandboxId: string,
+  archive: RepositoryArchive,
+): Promise<void> {
+  const partPaths = Array.from(
+    { length: archive.partCount },
+    (_, index) => `${HYDRATE_PART_PREFIX}${String(index).padStart(6, '0')}`,
+  );
+  const extractionScript = [
+    'set -euo pipefail',
+    `cat ${partPaths.map((partPath) => `'${partPath}'`).join(' ')} > '${HYDRATE_ARCHIVE_PATH}'`,
+    `printf '%s  %s\\n' '${archive.sha256}' '${HYDRATE_ARCHIVE_PATH}' | sha256sum --check --status`,
+    "mkdir -p '/workspace'",
+    `tar --extract --gzip --file '${HYDRATE_ARCHIVE_PATH}' --directory '/workspace'`,
+    `printf '%s\\n' '${archive.sha256}' > '${HYDRATE_COMPLETE_PATH}.tmp'`,
+    `mv '${HYDRATE_COMPLETE_PATH}.tmp' '${HYDRATE_COMPLETE_PATH}'`,
+  ].join('\n');
+
+  for (let attempt = 1; attempt <= HYDRATE_ATTEMPTS; attempt += 1) {
+    if (await archiveWasExtracted(client, sandboxId, archive.sha256)) {
+      return;
+    }
+
+    try {
+      const extractResult = await client.exec(sandboxId, ['bash', '-lc', extractionScript], {
+        timeoutMs: 300_000,
+      });
+      if (extractResult.exitCode === 0) {
+        return;
+      }
+      throw new Error(
+        `Could not verify and extract the repository archive: ` +
+          `${extractResult.stderr || extractResult.stdout}`,
+      );
+    } catch (error) {
+      if (await archiveWasExtracted(client, sandboxId, archive.sha256)) {
+        return;
+      }
+      if (attempt === HYDRATE_ATTEMPTS) {
+        throw error;
+      }
+      process.stderr.write(
+        `Archive extraction attempt ${attempt}/${HYDRATE_ATTEMPTS} failed: ` +
+          `${error instanceof Error ? error.message : String(error)}; retrying extraction with ` +
+          `the uploaded parts.\n`,
+      );
+      await delay(1_000 * 2 ** (attempt - 1));
+    }
+  }
+}
+
+async function cleanupHydrationFiles(
+  client: SandboxBridgeClient,
+  sandboxId: string,
+): Promise<void> {
+  try {
+    const cleanupResult = await client.exec(
+      sandboxId,
+      [
+        'bash',
+        '-lc',
+        `rm -f '${HYDRATE_PART_PREFIX}'* '${HYDRATE_ARCHIVE_PATH}' ` +
+          `'${HYDRATE_BOOTSTRAP_PATH}' '${HYDRATE_COMPLETE_PATH}' ` +
+          `'${HYDRATE_COMPLETE_PATH}.tmp'`,
+      ],
+      { cwd: '/workspace', timeoutMs: 120_000 },
+    );
+    if (cleanupResult.exitCode !== 0) {
+      throw new Error(cleanupResult.stderr || cleanupResult.stdout);
+    }
+  } catch (error) {
+    process.stderr.write(
+      `Warning: could not remove repository hydration files: ` +
+        `${error instanceof Error ? error.message : String(error)}.\n`,
+    );
+  }
+}
+
+export async function hydrateRepositoryArchive(
   client: SandboxBridgeClient,
   sandboxId: string,
   archive: RepositoryArchive,
 ): Promise<void> {
   // A small file operation waits for a cold container before the larger part uploads begin.
-  await client.writeFile(sandboxId, HYDRATE_BOOTSTRAP_PATH, 'ready');
+  await writeFileWithRetries(
+    client,
+    sandboxId,
+    HYDRATE_BOOTSTRAP_PATH,
+    'ready',
+    'Sandbox bootstrap upload',
+  );
 
   let uploadedParts = 0;
   for await (const part of readArchiveParts(archive.path, archive.partBytes)) {
     const partName = String(part.index).padStart(6, '0');
-    await client.writeFile(sandboxId, `${HYDRATE_PART_PREFIX}${partName}`, part.bytes);
+    await writeFileWithRetries(
+      client,
+      sandboxId,
+      `${HYDRATE_PART_PREFIX}${partName}`,
+      part.bytes,
+      `Archive part ${part.index + 1}/${archive.partCount} upload`,
+    );
     uploadedParts += 1;
     process.stderr.write(
       `Uploaded archive part ${uploadedParts}/${archive.partCount} (${part.bytes.byteLength} bytes).\n`,
@@ -65,28 +194,8 @@ async function hydrateRepositoryArchive(
     throw new Error(`Uploaded ${uploadedParts} archive parts; expected ${archive.partCount}.`);
   }
 
-  const extractResult = await client.exec(
-    sandboxId,
-    [
-      'bash',
-      '-lc',
-      [
-        'set -euo pipefail',
-        `cat '${HYDRATE_PART_PREFIX}'* > '${HYDRATE_ARCHIVE_PATH}'`,
-        `printf '%s  %s\\n' '${archive.sha256}' '${HYDRATE_ARCHIVE_PATH}' | sha256sum --check --status`,
-        "mkdir -p '/workspace'",
-        `tar --extract --gzip --file '${HYDRATE_ARCHIVE_PATH}' --directory '/workspace'`,
-        `rm -f '${HYDRATE_PART_PREFIX}'* '${HYDRATE_ARCHIVE_PATH}' '${HYDRATE_BOOTSTRAP_PATH}'`,
-      ].join('\n'),
-    ],
-    { timeoutMs: 300_000 },
-  );
-  if (extractResult.exitCode !== 0) {
-    throw new Error(
-      `Could not verify and extract the repository archive: ` +
-        `${extractResult.stderr || extractResult.stdout}`,
-    );
-  }
+  await extractRepositoryArchive(client, sandboxId, archive);
+  await cleanupHydrationFiles(client, sandboxId);
 }
 
 async function main(): Promise<void> {
@@ -113,21 +222,7 @@ async function main(): Promise<void> {
         `Created ${archive.byteLength}-byte repository archive with ${archive.fileCount} tracked ` +
           `files in ${archive.partCount} parts.\n`,
       );
-      for (let attempt = 1; attempt <= HYDRATE_ATTEMPTS; attempt += 1) {
-        try {
-          await hydrateRepositoryArchive(client, sandboxId, archive);
-          break;
-        } catch (error) {
-          if (attempt === HYDRATE_ATTEMPTS) {
-            throw error;
-          }
-          process.stderr.write(
-            `Hydration attempt ${attempt}/${HYDRATE_ATTEMPTS} failed: ` +
-              `${error instanceof Error ? error.message : String(error)}; restarting all parts.\n`,
-          );
-          await delay(1_000 * 2 ** (attempt - 1));
-        }
-      }
+      await hydrateRepositoryArchive(client, sandboxId, archive);
     } finally {
       await archive.dispose();
     }
@@ -210,4 +305,6 @@ async function main(): Promise<void> {
   );
 }
 
-await main();
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  await main();
+}

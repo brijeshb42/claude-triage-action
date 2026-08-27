@@ -33,6 +33,14 @@ describe('triage action isolation', () => {
     assert.match(action, /^\s+--tools "Skill"$/m);
     assert.match(action, /^\s+--permission-mode dontAsk$/m);
     assert.ok(action.split('\n').includes(`          --allowedTools "${allowedTools.join(',')}"`));
+    assert.match(
+      action,
+      /^\s+CLAUDE_BYTE_STREAM_IDLE_TIMEOUT_MS: \$\{\{ inputs\.claude-stream-idle-timeout-ms \}\}$/m,
+    );
+    assert.match(
+      action,
+      /^\s+CLAUDE_STREAM_IDLE_TIMEOUT_MS: \$\{\{ inputs\.claude-stream-idle-timeout-ms \}\}$/m,
+    );
   });
 
   it('keeps publication in a separate composite action', async () => {

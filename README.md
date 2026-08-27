@@ -100,6 +100,10 @@ directory paths exclude their contents, and wildcard patterns can omit generated
 tracked assets. Exclusions affect only the credential-free sandbox snapshot; the runner
 checkout and publisher validation checkout remain complete.
 
+The action sets both Claude Code response-stream watchdogs from
+`claude-stream-idle-timeout-ms` (10 minutes by default). This avoids the shorter first-party
+idle timeout aborting a valid long-thinking turn before Claude emits its first response byte.
+
 When a repository configures a disposable preview, keep a valid baseline project at that
 path and describe its provider and validation commands in `.github/claude-triage.yml`.
 The publisher accepts preview changes only alongside a real fix and only after the sandbox

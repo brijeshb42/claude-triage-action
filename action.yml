@@ -47,6 +47,9 @@ inputs:
   max-turns:
     description: Hard cap for the triage session.
     default: '60'
+  claude-stream-idle-timeout-ms:
+    description: Maximum silence allowed while waiting for bytes from Claude's response stream.
+    default: '600000'
   show-full-output:
     description: Show Claude's full output for debugging in non-sensitive repositories.
     default: 'false'
@@ -148,6 +151,8 @@ runs:
         SANDBOX_API_URL: ${{ inputs.sandbox-api-url }}
         SANDBOX_API_KEY: ${{ inputs.sandbox-api-key }}
         SANDBOX_ID: ${{ steps.setup.outputs.sandbox-id }}
+        CLAUDE_BYTE_STREAM_IDLE_TIMEOUT_MS: ${{ inputs.claude-stream-idle-timeout-ms }}
+        CLAUDE_STREAM_IDLE_TIMEOUT_MS: ${{ inputs.claude-stream-idle-timeout-ms }}
       with:
         anthropic_federation_rule_id: ${{ inputs.anthropic-federation-rule-id }}
         anthropic_organization_id: ${{ inputs.anthropic-organization-id }}

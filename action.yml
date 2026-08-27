@@ -45,8 +45,8 @@ inputs:
     description: Claude model passed to Claude Code.
     default: claude-sonnet-4-6
   max-turns:
-    description: Hard cap for the triage session.
-    default: '60'
+    description: Main-loop turn budget for the triage session.
+    default: '200'
   claude-stream-idle-timeout-ms:
     description: Maximum silence allowed while waiting for bytes from Claude's response stream.
     default: '600000'
@@ -185,6 +185,12 @@ runs:
           one initial preview attempt and at most one repair attempt, and remove incomplete
           preview changes if validation still fails. Do not publish to GitHub. Return the
           required structured result even when no safe fix or preview can be produced.
+
+          You have a hard budget of ${{ inputs.max-turns }} main-loop turns. Reaching that
+          limit terminates the run without a structured result. Finishing the triage is
+          the priority: once roughly 80% of the budget is used, stop broad investigation,
+          complete only essential validation, and return the required structured result.
+          A concise result that lands is better than a thorough one lost at the hard cap.
         claude_args: |
           --model ${{ inputs.model }}
           --mcp-config ${{ steps.setup.outputs.mcp-config }}

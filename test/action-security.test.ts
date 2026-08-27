@@ -46,6 +46,9 @@ describe('triage action isolation', () => {
       /^\s+EXECUTION_FILE: \$\{\{ steps\.claude\.outputs\.execution_file \}\}$/m,
     );
     assert.match(action, /dist\/save-agent-result\.mjs/);
+    assert.match(action, /^\s+default: '200'$/m);
+    assert.match(action, /hard budget of \$\{\{ inputs\.max-turns \}\} main-loop turns/);
+    assert.match(action, /return the required structured result/);
   });
 
   it('keeps publication in a separate composite action', async () => {

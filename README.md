@@ -19,9 +19,10 @@ The repository contains these reusable pieces:
 Claude Code and Anthropic federation remain on the GitHub-hosted runner. The sandbox
 receives a tracked source snapshot but no Anthropic or GitHub credentials.
 
-The Bridge is provider-adapted behind the existing `/v1/sandbox` HTTP contract. The current
-deployment sets `SANDBOX_PROVIDER=cloudflare`; adding another adapter does not change action,
-CLI, or MCP usage. Provider SDK credentials belong only in the Bridge deployment.
+The action, CLI, and MCP use the provider-neutral `/v1/sandbox` HTTP contract. Each sandbox
+provider owns a separate Bridge implementation and deployment, so switching the configured
+endpoint does not change action, CLI, or MCP usage. Provider SDK credentials belong only in
+that provider's Bridge deployment.
 
 Large tracked snapshots are compressed as one `tar.gz`, streamed to the Bridge as fixed
 16 MiB binary parts, reassembled with SHA-256 verification, and extracted once inside the

@@ -37,7 +37,6 @@
     "crons": ["* * * * *"],
   },
   "vars": {
-    "SANDBOX_PROVIDER": "cloudflare",
     "SANDBOX_TRANSPORT": "rpc",
     "WARM_POOL_TARGET": "0",
     "WARM_POOL_REFRESH_INTERVAL": "10000",

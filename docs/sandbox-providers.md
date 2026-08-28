@@ -10,10 +10,10 @@ PUT    /v1/sandbox/:id/file/*
 DELETE /v1/sandbox/:id
 ```
 
-The deployed Bridge selects a `SandboxBridgeAdapter` with `SANDBOX_PROVIDER` and translates
-that contract to the provider SDK. Provider credentials remain Bridge secrets; they are not
-sent to GitHub Actions, Claude, or the sandbox. Adding a provider therefore does not change
-the action inputs, `sandbox-cli`, or Sandbox MCP.
+Each provider owns a separate Bridge implementation and deployment that translates this
+contract to its SDK. Provider credentials remain Bridge secrets; they are not sent to GitHub
+Actions, Claude, or the sandbox. Adding a provider therefore changes the configured Bridge
+endpoint, not the action inputs, `sandbox-cli`, or Sandbox MCP.
 
 ## Cost model
 
@@ -24,13 +24,13 @@ utilized for a conservative comparison; actual duration and utilization can domi
 result. Prices exclude plan credits, taxes, logs, control-plane requests, and any unpublished
 network charge.
 
-| Provider      | Modeled resources               | Approx. ten-minute compute + memory + ephemeral disk | Fixed-plan consideration                                                                 |
-| ------------- | ------------------------------- | ---------------------------------------------------: | ---------------------------------------------------------------------------------------- |
-| Cloudflare    | 0.5 vCPU, 4 GiB, 8 GB           |                        $0.0123 before included usage | $5 Workers Paid; includes 25 GiB-hours memory, 375 vCPU-minutes, and 200 GB-hours disk   |
-| Daytona       | 2 vCPU, 4 GiB, 8 GB             |              $0.0277 conservatively billing all disk | Usage based; first 5 GiB storage is advertised free                                      |
-| E2B           | 2 vCPU, 4 GiB, included storage |                                              $0.0276 | Hobby has a one-hour session limit; Pro is $150/month plus usage                         |
+|      Provider |               Modeled resources | Approx. ten-minute compute + memory + ephemeral disk |                                                                 Fixed-plan consideration |
+| ------------: | ------------------------------: | ---------------------------------------------------: | ---------------------------------------------------------------------------------------: |
+|    Cloudflare |           0.5 vCPU, 4 GiB, 8 GB |                        $0.0123 before included usage |   $5 Workers Paid; includes 25 GiB-hours memory, 375 vCPU-minutes, and 200 GB-hours disk |
+|       Daytona |             2 vCPU, 4 GiB, 8 GB |              $0.0277 conservatively billing all disk |                                      Usage based; first 5 GiB storage is advertised free |
+|           E2B | 2 vCPU, 4 GiB, included storage |                                              $0.0276 |                         Hobby has a one-hour session limit; Pro is $150/month plus usage |
 | Modal Sandbox | 1 physical core (2 vCPU), 4 GiB |                                              $0.0397 | Starter is $0 with usage; selected regions and non-preemptible execution add multipliers |
-| Fly Machine   | 2 shared CPUs, 4 GiB            |              roughly $0.005-$0.006, region dependent | Raw VM price; not an equivalent managed sandbox control plane                            |
+|   Fly Machine |            2 shared CPUs, 4 GiB |              roughly $0.005-$0.006, region dependent |                            Raw VM price; not an equivalent managed sandbox control plane |
 
 Cloudflare rates are $0.000020/vCPU-second, $0.0000025/GiB-second, and
 $0.00000007/GB-second. Its memory and disk charges use provisioned resources while CPU uses
@@ -67,7 +67,7 @@ sleeping container restarts from the image with a fresh disk.
 
 ### Daytona
 
-Daytona is the preferred second adapter. Its managed container sandbox starts from advertised
+Daytona is the preferred second implementation. Its managed container sandbox starts from advertised
 sub-90ms snapshots, and the TypeScript SDK exposes lifecycle, process, filesystem, metrics,
 preview, snapshot, archive, volume, and network-policy APIs. The `daytona-medium` shape is
 2 vCPU, 4 GiB memory, and 8 GiB disk. Stopped sandboxes bill only disk; archived container
@@ -114,7 +114,7 @@ control-plane engineering.
 ## Recommendation and decision triggers
 
 1. Keep Cloudflare as the production default while usage fits the included allocation.
-2. Implement Daytona as the first alternate adapter and run identical benchmark issues on
+2. Implement Daytona as the first alternate Bridge and run identical benchmark issues on
    both providers before changing defaults.
 3. Record per run: create latency, hydration latency, dependency-install wall/CPU time,
    validation wall/CPU time, peak memory, provisioned disk, bytes uploaded/downloaded,

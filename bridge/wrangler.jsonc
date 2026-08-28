@@ -1,7 +1,7 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "brijeshb42-claude-triage-sandbox",
-  "main": "src/index.ts",
+  "main": "src/cloudflare-entrypoint.ts",
   "compatibility_date": "2026-08-25",
   "compatibility_flags": ["nodejs_compat"],
   "workers_dev": true,

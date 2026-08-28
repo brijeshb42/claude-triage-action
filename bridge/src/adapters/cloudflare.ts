@@ -1,6 +1,9 @@
 import { bridge } from '@cloudflare/sandbox/bridge';
 import type { SandboxBridgeAdapter } from './types';
 
+export { Sandbox } from '@cloudflare/sandbox';
+export { WarmPool } from '@cloudflare/sandbox/bridge';
+
 const cloudflareBridge = bridge({
   async fetch(): Promise<Response> {
     return new Response('Claude triage Sandbox Bridge');

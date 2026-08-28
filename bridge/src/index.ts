@@ -1,8 +1,5 @@
 import { getSandboxBridgeAdapter } from './adapters/registry';
 
-export { Sandbox } from '@cloudflare/sandbox';
-export { WarmPool } from '@cloudflare/sandbox/bridge';
-
 function providerError(error: unknown): Response {
   return Response.json(
     {

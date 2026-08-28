@@ -10,11 +10,16 @@ const reporterPath = new URL('../report/action.yml', import.meta.url);
 const triageActionPath = new URL('../triage/action.yml', import.meta.url);
 
 describe('triage action isolation', () => {
-  it('installs the pinned standalone pnpm image without Corepack', async () => {
+  it('installs the pinned standalone pnpm CLI with the official installer', async () => {
     const dockerfile = await readFile(bridgeDockerfilePath, 'utf8');
 
-    assert.match(dockerfile, /^FROM ghcr\.io\/pnpm\/pnpm:11\.22\.0@sha256:[a-f0-9]{64} AS pnpm$/m);
-    assert.match(dockerfile, /^COPY --from=pnpm \/pnpm \/pnpm$/m);
+    assert.match(dockerfile, /^ARG PNPM_VERSION=11\.22\.0$/m);
+    assert.match(dockerfile, /^ENV PNPM_HOME=\/pnpm$/m);
+    assert.match(dockerfile, /^ENV PATH="\$\{PNPM_HOME\}:\$\{PATH\}"$/m);
+    assert.match(dockerfile, /curl -fsSL https:\/\/get\.pnpm\.io\/install\.sh/);
+    assert.match(dockerfile, /env PNPM_VERSION="\$\{PNPM_VERSION\}" SHELL=\/bin\/sh sh -/);
+    assert.match(dockerfile, /test "\$\(pnpm --version\)" = "\$\{PNPM_VERSION\}"/);
+    assert.doesNotMatch(dockerfile, /ghcr\.io\/pnpm/);
     assert.doesNotMatch(dockerfile, /corepack/i);
   });
 

@@ -149,6 +149,23 @@ describe('triage action isolation', () => {
     assert.doesNotMatch(reporter, /SANDBOX_API_KEY/);
   });
 
+  it('publishes trusted run telemetry in triage comments and pull request descriptions', async () => {
+    const [publisher, reporter, fix, triage] = await Promise.all([
+      readFile(publisherPath, 'utf8'),
+      readFile(reporterPath, 'utf8'),
+      readFile(fixActionPath, 'utf8'),
+      readFile(triageActionPath, 'utf8'),
+    ]);
+
+    assert.match(fix, /^\s+--effort \$\{\{ inputs\.reasoning-effort \}\}$/m);
+    assert.match(triage, /^\s+--effort \$\{\{ inputs\.reasoning-effort \}\}$/m);
+    assert.match(publisher, /write-run-footer\.mjs/);
+    assert.match(publisher, /const body = `\$\{description\}\$\{footer\}`/);
+    assert.match(publisher, /const body = `\$\{report\}\$\{footer\}`/);
+    assert.match(reporter, /write-run-footer\.mjs/);
+    assert.match(reporter, /const body = `\$\{report\}\$\{footer\}`/);
+  });
+
   it('publishes only validated previews alongside a real fix', async () => {
     const publisher = await readFile(publisherPath, 'utf8');
 

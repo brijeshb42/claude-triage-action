@@ -35,4 +35,9 @@ await Promise.all([
     entryPoints: ['src/validate-triage-artifact.ts'],
     outfile: 'dist/validate-triage-artifact.mjs',
   }),
+  build({
+    ...shared,
+    entryPoints: ['src/write-run-footer.ts'],
+    outfile: 'dist/write-run-footer.mjs',
+  }),
 ]);

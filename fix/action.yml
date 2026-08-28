@@ -56,6 +56,12 @@ inputs:
   model:
     description: Claude model used for the sandboxed fix.
     default: claude-sonnet-4-6
+  reasoning-effort:
+    description: Claude reasoning effort recorded in the published run footer.
+    default: high
+  review-depth:
+    description: Investigation depth used by the fix and recorded in the published run footer.
+    default: medium
   max-turns:
     description: Main-loop turn budget for the sandboxed fix.
     default: '200'
@@ -288,8 +294,12 @@ runs:
           Dependency installation was completed by a deterministic setup step before this session.
           Do not reinstall dependencies unless you changed a package manifest or the installed state
           is demonstrably unusable.
+
+          Work at `${{ inputs.review-depth }}` review depth. This is separate from Claude's
+          `${{ inputs.reasoning-effort }}` reasoning-effort setting.
         claude_args: |
           --model ${{ inputs.model }}
+          --effort ${{ inputs.reasoning-effort }}
           --mcp-config ${{ steps.setup.outputs.mcp-config }}
           --strict-mcp-config
           --plugin-dir ${{ github.action_path }}/../plugin
@@ -304,6 +314,9 @@ runs:
       shell: bash
       env:
         EXECUTION_FILE: ${{ steps.claude.outputs.execution_file }}
+        MODEL: ${{ inputs.model }}
+        REASONING_EFFORT: ${{ inputs.reasoning-effort }}
+        REVIEW_DEPTH: ${{ inputs.review-depth }}
         RESULT_JSON: ${{ steps.claude.outputs.structured_output }}
         RESULT_PATH: ${{ runner.temp }}/claude-fix/claude-triage-result.json
       run: |

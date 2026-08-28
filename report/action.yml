@@ -47,23 +47,33 @@ runs:
         EXPECTED_WORKFLOW_REF: ${{ github.workflow_ref }}
       run: node "$GITHUB_ACTION_PATH/../dist/validate-triage-artifact.mjs"
 
+    - name: Prepare the run footer
+      shell: bash
+      env:
+        METADATA_PATH: ${{ runner.temp }}/claude-triage-report/triage-manifest.json
+        OUTPUT_PATH: ${{ runner.temp }}/claude-triage-report/run-footer.md
+        RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ inputs.source-run-id }}
+      run: node "$GITHUB_ACTION_PATH/../dist/write-run-footer.mjs"
+
     - name: Publish the read-only triage report
       uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
       env:
         ISSUE_NUMBER: ${{ inputs.issue-number }}
         MODE: ${{ inputs.mode }}
         RESULT_PATH: ${{ runner.temp }}/claude-triage-report/triage-result.json
+        FOOTER_PATH: ${{ runner.temp }}/claude-triage-report/run-footer.md
       with:
         github-token: ${{ inputs.github-token }}
         script: |
           const fs = require('fs');
           const result = JSON.parse(fs.readFileSync(process.env.RESULT_PATH, 'utf8'));
+          const footer = fs.readFileSync(process.env.FOOTER_PATH, 'utf8');
           const marker = '<!-- claude-cloudflare-triage -->';
           const disposition = result.disposition.replaceAll('_', ' ');
           const status = process.env.MODE === 'in-progress'
             ? '**Fix:** A sandboxed fix attempt is in progress.'
             : `**Fix:** Not started (${disposition}).`;
-          const body = [
+          const report = [
             marker,
             '## Claude triage',
             '',
@@ -78,6 +88,7 @@ runs:
             '',
             '**Validation:** Read-only triage only; no repository commands or tests were run.',
           ].join('\n');
+          const body = `${report}${footer}`;
           const issue_number = Number(process.env.ISSUE_NUMBER);
           const comments = await github.paginate(github.rest.issues.listComments, {
             owner: context.repo.owner,

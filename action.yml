@@ -44,6 +44,12 @@ inputs:
   model:
     description: Claude model passed to Claude Code.
     default: claude-sonnet-4-6
+  reasoning-effort:
+    description: Claude reasoning effort recorded in the published run footer.
+    default: high
+  review-depth:
+    description: Investigation depth recorded in the published run footer.
+    default: medium
   max-turns:
     description: Main-loop turn budget for the triage session.
     default: '200'
@@ -203,6 +209,7 @@ runs:
           result instead of waiting or retrying indefinitely.
         claude_args: |
           --model ${{ inputs.model }}
+          --effort ${{ inputs.reasoning-effort }}
           --mcp-config ${{ steps.setup.outputs.mcp-config }}
           --strict-mcp-config
           --plugin-dir ${{ github.action_path }}/plugin
@@ -218,6 +225,9 @@ runs:
       env:
         RESULT_JSON: ${{ steps.claude.outputs.structured_output }}
         EXECUTION_FILE: ${{ steps.claude.outputs.execution_file }}
+        MODEL: ${{ inputs.model }}
+        REASONING_EFFORT: ${{ inputs.reasoning-effort }}
+        REVIEW_DEPTH: ${{ inputs.review-depth }}
         RESULT_PATH: ${{ runner.temp }}/claude-triage-result.json
       run: node "$GITHUB_ACTION_PATH/dist/save-agent-result.mjs"
 

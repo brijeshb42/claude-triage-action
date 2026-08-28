@@ -18,25 +18,48 @@ function isTriageResult(value) {
   return (value.status === "completed" || value.status === "failed") && (value.disposition === "actionable" || value.disposition === "needs_information" || value.disposition === "no_safe_fix" || value.disposition === "out_of_scope") && typeof value.summary === "string" && typeof value.probableCause === "string" && (value.confidence === "low" || value.confidence === "medium" || value.confidence === "high") && isStringArray(value.relevantPaths) && isStringArray(value.evidence) && isStringArray(value.validationPlan) && isStringArray(value.unresolvedQuestions);
 }
 
-// src/triage-artifact.ts
-var TRIAGE_ARTIFACT_SCHEMA_VERSION = 1;
-var TRIAGE_ELIGIBILITY_DAYS = 14;
+// src/run-metadata.ts
 function isRecord2(value) {
   return typeof value === "object" && value !== null;
 }
-function isIssueContext(value) {
-  if (!isRecord2(value) || !Array.isArray(value.labels) || !Array.isArray(value.comments)) {
-    return false;
-  }
-  return typeof value.repository === "string" && typeof value.repositoryId === "string" && typeof value.number === "number" && Number.isInteger(value.number) && typeof value.title === "string" && typeof value.body === "string" && value.comments.every(
-    (comment) => isRecord2(comment) && (typeof comment.author === "string" || comment.author === null) && typeof comment.body === "string" && typeof comment.createdAt === "string"
-  );
+function isReasoningEffort(value) {
+  return value === "low" || value === "medium" || value === "high" || value === "max";
 }
-function isTriageManifest(value) {
+function isReviewDepth(value) {
+  return value === "low" || value === "medium" || value === "high" || value === "xhigh" || value === "max";
+}
+function optionalNonNegativeNumber(value) {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : void 0;
+}
+function optionalTurnCount(value) {
+  return typeof value === "number" && Number.isInteger(value) && value >= 0 ? value : void 0;
+}
+function isRunMetadata(value) {
   if (!isRecord2(value)) {
     return false;
   }
-  return value.schemaVersion === TRIAGE_ARTIFACT_SCHEMA_VERSION && typeof value.repository === "string" && typeof value.repositoryId === "string" && typeof value.issueNumber === "number" && Number.isInteger(value.issueNumber) && typeof value.triggerCommentId === "string" && typeof value.baseBranch === "string" && typeof value.baseSha === "string" && /^[a-f0-9]{40}$/.test(value.baseSha) && typeof value.workflowRef === "string" && typeof value.runId === "number" && Number.isInteger(value.runId) && typeof value.runAttempt === "number" && Number.isInteger(value.runAttempt) && typeof value.actionRef === "string" && typeof value.model === "string" && typeof value.createdAt === "string" && typeof value.expiresAt === "string";
+  return value.agent === "Claude Code" && typeof value.model === "string" && /^[A-Za-z0-9._-]+$/.test(value.model) && isReasoningEffort(value.reasoningEffort) && isReviewDepth(value.reviewDepth) && (value.turns === void 0 || optionalTurnCount(value.turns) !== void 0) && (value.durationMs === void 0 || optionalNonNegativeNumber(value.durationMs) !== void 0) && (value.costUsd === void 0 || optionalNonNegativeNumber(value.costUsd) !== void 0);
+}
+
+// src/triage-artifact.ts
+var TRIAGE_ARTIFACT_SCHEMA_VERSION = 1;
+var TRIAGE_ELIGIBILITY_DAYS = 14;
+function isRecord3(value) {
+  return typeof value === "object" && value !== null;
+}
+function isIssueContext(value) {
+  if (!isRecord3(value) || !Array.isArray(value.labels) || !Array.isArray(value.comments)) {
+    return false;
+  }
+  return typeof value.repository === "string" && typeof value.repositoryId === "string" && typeof value.number === "number" && Number.isInteger(value.number) && typeof value.title === "string" && typeof value.body === "string" && value.comments.every(
+    (comment) => isRecord3(comment) && (typeof comment.author === "string" || comment.author === null) && typeof comment.body === "string" && typeof comment.createdAt === "string"
+  );
+}
+function isTriageManifest(value) {
+  if (!isRecord3(value)) {
+    return false;
+  }
+  return value.schemaVersion === TRIAGE_ARTIFACT_SCHEMA_VERSION && typeof value.repository === "string" && typeof value.repositoryId === "string" && typeof value.issueNumber === "number" && Number.isInteger(value.issueNumber) && typeof value.triggerCommentId === "string" && typeof value.baseBranch === "string" && typeof value.baseSha === "string" && /^[a-f0-9]{40}$/.test(value.baseSha) && typeof value.workflowRef === "string" && typeof value.runId === "number" && Number.isInteger(value.runId) && typeof value.runAttempt === "number" && Number.isInteger(value.runAttempt) && typeof value.actionRef === "string" && typeof value.model === "string" && (value.runMetadata === void 0 || isRunMetadata(value.runMetadata)) && typeof value.createdAt === "string" && typeof value.expiresAt === "string";
 }
 function workflowPathFromRef(workflowRef) {
   const separator = workflowRef.lastIndexOf("@");

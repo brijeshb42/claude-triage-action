@@ -2,6 +2,7 @@
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import * as path from 'node:path';
 import { TRIAGE_ARTIFACT_SCHEMA_VERSION, TRIAGE_ELIGIBILITY_DAYS } from './triage-artifact.js';
+import { createRunMetadata } from './run-metadata.js';
 import {
   formatTriageLogLine,
   formatTriageStepSummary,
@@ -34,6 +35,11 @@ if (process.env.EXECUTION_FILE) {
 }
 
 const result = selectTriageResult(process.env.RESULT_JSON, executionMessages);
+const runMetadata = createRunMetadata(executionMessages, {
+  model: requiredEnvironment('MODEL'),
+  reasoningEffort: requiredEnvironment('REASONING_EFFORT'),
+  reviewDepth: requiredEnvironment('REVIEW_DEPTH'),
+});
 const outputDirectory = path.resolve(requiredEnvironment('OUTPUT_DIRECTORY'));
 const createdAt = new Date();
 const expiresAt = new Date(createdAt.valueOf() + TRIAGE_ELIGIBILITY_DAYS * 24 * 60 * 60 * 1_000);
@@ -50,6 +56,7 @@ const manifest = {
   runAttempt: positiveInteger('RUN_ATTEMPT'),
   actionRef: process.env.ACTION_REF || 'local',
   model: requiredEnvironment('MODEL'),
+  runMetadata,
   createdAt: createdAt.toISOString(),
   expiresAt: expiresAt.toISOString(),
 };

@@ -43,6 +43,14 @@ runs:
         name: ${{ inputs.artifact-name }}
         path: ${{ runner.temp }}/claude-triage
 
+    - name: Prepare the run footer
+      shell: bash
+      env:
+        METADATA_PATH: ${{ runner.temp }}/claude-triage/claude-triage-result.json
+        OUTPUT_PATH: ${{ runner.temp }}/claude-triage/run-footer.md
+        RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+      run: node "$GITHUB_ACTION_PATH/../dist/write-run-footer.mjs"
+
     - name: Resolve the current pull request base
       id: base
       shell: bash
@@ -135,14 +143,16 @@ runs:
         ISSUE_NUMBER: ${{ inputs.issue-number }}
         RESULT_PATH: ${{ runner.temp }}/claude-triage/claude-triage-result.json
         PREVIEW_READY: ${{ steps.patch.outputs.preview-ready }}
+        FOOTER_PATH: ${{ runner.temp }}/claude-triage/run-footer.md
       run: |
         node --input-type=module <<'NODE'
         import { appendFileSync, readFileSync, writeFileSync } from 'node:fs';
         const result = JSON.parse(readFileSync(process.env.RESULT_PATH, 'utf8'));
+        const footer = readFileSync(process.env.FOOTER_PATH, 'utf8');
         const title = String(result.prTitle || `fix: address issue #${process.env.ISSUE_NUMBER}`)
           .replace(/[\r\n]+/g, ' ')
           .slice(0, 240);
-        const body = [
+        const description = [
           String(result.prBody || result.summary || 'Automated triage fix.'),
           '',
           `Closes #${process.env.ISSUE_NUMBER}`,
@@ -152,6 +162,7 @@ runs:
           '',
           '> Draft created by the Cloudflare-sandboxed triage prototype. Review before merging.',
         ].join('\n');
+        const body = `${description}${footer}`;
         const metadataPath = `${process.env.RUNNER_TEMP}/claude-triage-pr.json`;
         writeFileSync(metadataPath, JSON.stringify({ title, body }));
         appendFileSync(process.env.GITHUB_OUTPUT, `title=${title}\nmetadata-path=${metadataPath}\n`);
@@ -314,10 +325,12 @@ runs:
         PATCH_OUTCOME: ${{ steps.patch.outcome }}
         PR_URL: ${{ steps.pr.outputs.url }}
         PREVIEW_READY: ${{ steps.patch.outputs.preview-ready }}
+        FOOTER_PATH: ${{ runner.temp }}/claude-triage/run-footer.md
       with:
         github-token: ${{ inputs.github-token }}
         script: |
           const fs = require('fs');
+          const footer = fs.readFileSync(process.env.FOOTER_PATH, 'utf8');
           const marker = '<!-- claude-cloudflare-triage -->';
           let result;
           try {
@@ -338,7 +351,7 @@ runs:
           const previewLine = process.env.PREVIEW_READY === 'true' && process.env.PR_URL
             ? '**StackBlitz preview:** Publication is pending in the pull request CI.'
             : '**StackBlitz preview:** Not produced for this run.';
-          const body = [
+          const report = [
             marker,
             '## Claude triage',
             '',
@@ -353,6 +366,7 @@ runs:
             '<!-- claude-triage-preview-status -->',
             previewLine,
           ].join('\n');
+          const body = `${report}${footer}`;
           const issue_number = Number(process.env.ISSUE_NUMBER);
           const { data: comments } = await github.rest.issues.listComments({
             owner: context.repo.owner,

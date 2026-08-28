@@ -1,4 +1,5 @@
 import { isTriageResult, type TriageResult } from './triage-result.js';
+import { isRunMetadata, type RunMetadata } from './run-metadata.js';
 
 export const TRIAGE_ARTIFACT_SCHEMA_VERSION = 1;
 export const TRIAGE_ELIGIBILITY_DAYS = 14;
@@ -16,6 +17,7 @@ export interface TriageManifest {
   runAttempt: number;
   actionRef: string;
   model: string;
+  runMetadata?: RunMetadata;
   createdAt: string;
   expiresAt: string;
 }
@@ -95,6 +97,7 @@ export function isTriageManifest(value: unknown): value is TriageManifest {
     Number.isInteger(value.runAttempt) &&
     typeof value.actionRef === 'string' &&
     typeof value.model === 'string' &&
+    (value.runMetadata === undefined || isRunMetadata(value.runMetadata)) &&
     typeof value.createdAt === 'string' &&
     typeof value.expiresAt === 'string'
   );

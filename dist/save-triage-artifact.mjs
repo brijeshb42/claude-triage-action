@@ -114,6 +114,52 @@ function selectTriageResult(structuredResultJson, executionMessages2) {
   return createApiFailureResult(executionMessages2) ?? DEFAULT_TRIAGE_RESULT;
 }
 
+// src/run-metadata.ts
+function isRecord2(value) {
+  return typeof value === "object" && value !== null;
+}
+function isReasoningEffort(value) {
+  return value === "low" || value === "medium" || value === "high" || value === "max";
+}
+function isReviewDepth(value) {
+  return value === "low" || value === "medium" || value === "high" || value === "xhigh" || value === "max";
+}
+function optionalNonNegativeNumber(value) {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : void 0;
+}
+function optionalTurnCount(value) {
+  return typeof value === "number" && Number.isInteger(value) && value >= 0 ? value : void 0;
+}
+function validateModel(model) {
+  const normalized = model.trim();
+  if (!/^[A-Za-z0-9._-]+$/.test(normalized)) {
+    throw new Error("MODEL must contain only letters, numbers, dots, underscores, and hyphens.");
+  }
+  return normalized;
+}
+function createRunMetadata(executionMessages2, configuration) {
+  if (!isReasoningEffort(configuration.reasoningEffort)) {
+    throw new Error(`Unsupported reasoning effort: ${configuration.reasoningEffort}`);
+  }
+  if (!isReviewDepth(configuration.reviewDepth)) {
+    throw new Error(`Unsupported review depth: ${configuration.reviewDepth}`);
+  }
+  const terminalResult = Array.isArray(executionMessages2) ? executionMessages2.findLast((message) => isRecord2(message) && message.type === "result") : void 0;
+  const result2 = isRecord2(terminalResult) ? terminalResult : {};
+  const turns = optionalTurnCount(result2.num_turns);
+  const durationMs = optionalNonNegativeNumber(result2.duration_ms);
+  const costUsd = optionalNonNegativeNumber(result2.total_cost_usd);
+  return {
+    agent: "Claude Code",
+    model: validateModel(configuration.model),
+    reasoningEffort: configuration.reasoningEffort,
+    reviewDepth: configuration.reviewDepth,
+    ...turns === void 0 ? {} : { turns },
+    ...durationMs === void 0 ? {} : { durationMs },
+    ...costUsd === void 0 ? {} : { costUsd }
+  };
+}
+
 // src/triage-artifact.ts
 var TRIAGE_ARTIFACT_SCHEMA_VERSION = 1;
 var TRIAGE_ELIGIBILITY_DAYS = 14;
@@ -142,6 +188,11 @@ if (process.env.EXECUTION_FILE) {
   }
 }
 var result = selectTriageResult(process.env.RESULT_JSON, executionMessages);
+var runMetadata = createRunMetadata(executionMessages, {
+  model: requiredEnvironment("MODEL"),
+  reasoningEffort: requiredEnvironment("REASONING_EFFORT"),
+  reviewDepth: requiredEnvironment("REVIEW_DEPTH")
+});
 var outputDirectory = path.resolve(requiredEnvironment("OUTPUT_DIRECTORY"));
 var createdAt = /* @__PURE__ */ new Date();
 var expiresAt = new Date(createdAt.valueOf() + TRIAGE_ELIGIBILITY_DAYS * 24 * 60 * 60 * 1e3);
@@ -158,6 +209,7 @@ var manifest = {
   runAttempt: positiveInteger("RUN_ATTEMPT"),
   actionRef: process.env.ACTION_REF || "local",
   model: requiredEnvironment("MODEL"),
+  runMetadata,
   createdAt: createdAt.toISOString(),
   expiresAt: expiresAt.toISOString()
 };

@@ -23,8 +23,12 @@ plane; every repository operation happens through the sandbox MCP.
    dependencies are missing, the repository's install command may run inside the credential-free
    sandbox.
 6. After the fix passes, inspect trusted `.github/claude-triage.yml`. If it configures a preview,
-   create a concise demonstration in that directory. Make one initial attempt and at most one repair
-   attempt; remove incomplete preview changes if validation still fails.
+   create a concise demonstration in that directory. The same example must make the reported bug
+   apparent with the current released package and make the corrected behavior apparent with the
+   fixed workspace package that pkg.pr.new will publish. Prefer a natural, user-observable manual
+   reproduction; simulated interaction is not required. Do not use a proxy signal that can pass in
+   both the released and fixed versions. Make one initial attempt and at most one repair attempt;
+   remove incomplete preview changes if validation still fails.
 7. Inspect the final diff and status, remove scratch files, and leave only the fix, regression tests,
    and successfully validated preview.
 8. Return the required structured result even when no safe fix can be produced.
@@ -33,5 +37,8 @@ plane; every repository operation happens through the sandbox MCP.
 
 - Prefer a failing regression test that passes after the fix.
 - Preserve runtime semantics such as React callback-ref cleanup, not merely the reported happy path.
+- Treat the regression test or verified pre-fix behavior as the preview's negative-control evidence
+  when the future pkg.pr.new package cannot yet be installed. Never claim the released-package
+  comparison was run unless it actually was.
 - Set `previewReady` only when the configured preview changed and its validation succeeded.
 - Never mutate GitHub. A separate trusted publisher validates the patch and creates the draft PR.

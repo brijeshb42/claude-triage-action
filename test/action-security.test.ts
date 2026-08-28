@@ -8,6 +8,7 @@ const fixActionPath = new URL('../fix/action.yml', import.meta.url);
 const publisherPath = new URL('../publish/action.yml', import.meta.url);
 const reporterPath = new URL('../report/action.yml', import.meta.url);
 const triageActionPath = new URL('../triage/action.yml', import.meta.url);
+const fixSkillPath = new URL('../plugin/skills/mui-fix-ci/SKILL.md', import.meta.url);
 
 describe('triage action isolation', () => {
   it('installs the pinned standalone pnpm CLI with the official installer', async () => {
@@ -137,7 +138,10 @@ describe('triage action isolation', () => {
   });
 
   it('gives only the fix stage access to sandbox mutation tools', async () => {
-    const fix = await readFile(fixActionPath, 'utf8');
+    const [fix, fixSkill] = await Promise.all([
+      readFile(fixActionPath, 'utf8'),
+      readFile(fixSkillPath, 'utf8'),
+    ]);
 
     assert.match(fix, /Skill\(mui-fix-ci\)/);
     assert.match(fix, /mcp__sandbox__read_triage_context/);
@@ -150,6 +154,10 @@ describe('triage action isolation', () => {
     assert.match(fix, /- name: Install sandbox dependencies before starting Claude/);
     assert.match(fix, /install-dependencies/);
     assert.match(fix, /Dependency installation was completed by a deterministic setup step/);
+    assert.match(fix, /same example[\s\S]*current released package[\s\S]*pkg\.pr\.new/);
+    assert.match(fix, /simulated interaction is not required/);
+    assert.match(fixSkill, /same example must make the reported bug/);
+    assert.match(fixSkill, /proxy signal that can pass in[\s\S]*released and fixed versions/);
     assert.match(fix, /^\s+dependency-install-timeout-ms:$/m);
     assert.doesNotMatch(fix, /permission-issues: write/);
   });

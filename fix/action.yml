@@ -295,6 +295,12 @@ runs:
           Do not reinstall dependencies unless you changed a package manifest or the installed state
           is demonstrably unusable.
 
+          If a disposable preview is configured, make the fix directly observable: the same example
+          should expose the bug with the current released package and show the corrected behavior with
+          the fixed workspace package that pkg.pr.new will publish. A clear manual reproduction is
+          sufficient; simulated interaction is not required. Do not rely on an indicator that can pass
+          in both versions, and do not claim a released-package comparison unless you ran it.
+
           Work at `${{ inputs.review-depth }}` review depth. This is separate from Claude's
           `${{ inputs.reasoning-effort }}` reasoning-effort setting.
         claude_args: |

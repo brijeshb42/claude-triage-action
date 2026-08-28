@@ -1,11 +1,9 @@
 export type ReasoningEffort = 'low' | 'medium' | 'high' | 'max';
-export type ReviewDepth = 'low' | 'medium' | 'high' | 'xhigh' | 'max';
 
 export interface RunMetadata {
   agent: 'Claude Code';
   model: string;
   reasoningEffort: ReasoningEffort;
-  reviewDepth: ReviewDepth;
   turns?: number;
   durationMs?: number;
   costUsd?: number;
@@ -14,7 +12,6 @@ export interface RunMetadata {
 interface RunConfiguration {
   model: string;
   reasoningEffort: string;
-  reviewDepth: string;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -23,16 +20,6 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function isReasoningEffort(value: unknown): value is ReasoningEffort {
   return value === 'low' || value === 'medium' || value === 'high' || value === 'max';
-}
-
-function isReviewDepth(value: unknown): value is ReviewDepth {
-  return (
-    value === 'low' ||
-    value === 'medium' ||
-    value === 'high' ||
-    value === 'xhigh' ||
-    value === 'max'
-  );
 }
 
 function optionalNonNegativeNumber(value: unknown): number | undefined {
@@ -59,10 +46,6 @@ export function createRunMetadata(
   if (!isReasoningEffort(configuration.reasoningEffort)) {
     throw new Error(`Unsupported reasoning effort: ${configuration.reasoningEffort}`);
   }
-  if (!isReviewDepth(configuration.reviewDepth)) {
-    throw new Error(`Unsupported review depth: ${configuration.reviewDepth}`);
-  }
-
   const terminalResult = Array.isArray(executionMessages)
     ? executionMessages.findLast((message) => isRecord(message) && message.type === 'result')
     : undefined;
@@ -75,7 +58,6 @@ export function createRunMetadata(
     agent: 'Claude Code',
     model: validateModel(configuration.model),
     reasoningEffort: configuration.reasoningEffort,
-    reviewDepth: configuration.reviewDepth,
     ...(turns === undefined ? {} : { turns }),
     ...(durationMs === undefined ? {} : { durationMs }),
     ...(costUsd === undefined ? {} : { costUsd }),
@@ -93,7 +75,6 @@ export function isRunMetadata(value: unknown): value is RunMetadata {
     typeof value.model === 'string' &&
     /^[A-Za-z0-9._-]+$/.test(value.model) &&
     isReasoningEffort(value.reasoningEffort) &&
-    isReviewDepth(value.reviewDepth) &&
     (value.turns === undefined || optionalTurnCount(value.turns) !== undefined) &&
     (value.durationMs === undefined || optionalNonNegativeNumber(value.durationMs) !== undefined) &&
     (value.costUsd === undefined || optionalNonNegativeNumber(value.costUsd) !== undefined)
@@ -125,7 +106,6 @@ export function formatRunFooter(metadata: RunMetadata, runUrl: string): string {
 
   const facts = [
     `${formatModel(metadata.model)} (${titleCase(metadata.reasoningEffort)})`,
-    `\`${metadata.reviewDepth}\` review depth`,
     metadata.turns === undefined ? undefined : `${metadata.turns} turns`,
     metadata.durationMs === undefined ? undefined : formatDuration(metadata.durationMs),
     metadata.costUsd === undefined ? undefined : `$${metadata.costUsd.toFixed(2)}`,

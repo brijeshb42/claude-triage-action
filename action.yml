@@ -47,9 +47,6 @@ inputs:
   reasoning-effort:
     description: Claude reasoning effort recorded in the published run footer.
     default: high
-  review-depth:
-    description: Investigation depth recorded in the published run footer.
-    default: medium
   max-turns:
     description: Main-loop turn budget for the triage session.
     default: '200'
@@ -227,7 +224,6 @@ runs:
         EXECUTION_FILE: ${{ steps.claude.outputs.execution_file }}
         MODEL: ${{ inputs.model }}
         REASONING_EFFORT: ${{ inputs.reasoning-effort }}
-        REVIEW_DEPTH: ${{ inputs.review-depth }}
         RESULT_PATH: ${{ runner.temp }}/claude-triage-result.json
       run: node "$GITHUB_ACTION_PATH/dist/save-agent-result.mjs"
 

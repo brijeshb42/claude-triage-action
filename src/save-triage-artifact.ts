@@ -38,7 +38,6 @@ const result = selectTriageResult(process.env.RESULT_JSON, executionMessages);
 const runMetadata = createRunMetadata(executionMessages, {
   model: requiredEnvironment('MODEL'),
   reasoningEffort: requiredEnvironment('REASONING_EFFORT'),
-  reviewDepth: requiredEnvironment('REVIEW_DEPTH'),
 });
 const outputDirectory = path.resolve(requiredEnvironment('OUTPUT_DIRECTORY'));
 const createdAt = new Date();

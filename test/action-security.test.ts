@@ -172,15 +172,19 @@ describe('triage action isolation', () => {
   });
 
   it('publishes trusted run telemetry in triage comments and pull request descriptions', async () => {
-    const [publisher, reporter, fix, triage] = await Promise.all([
+    const [publisher, reporter, action, fix, triage] = await Promise.all([
       readFile(publisherPath, 'utf8'),
       readFile(reporterPath, 'utf8'),
+      readFile(actionPath, 'utf8'),
       readFile(fixActionPath, 'utf8'),
       readFile(triageActionPath, 'utf8'),
     ]);
 
     assert.match(fix, /^\s+--effort \$\{\{ inputs\.reasoning-effort \}\}$/m);
     assert.match(triage, /^\s+--effort \$\{\{ inputs\.reasoning-effort \}\}$/m);
+    for (const actionDefinition of [action, fix, triage]) {
+      assert.doesNotMatch(actionDefinition, /review-depth|REVIEW_DEPTH/);
+    }
     assert.match(publisher, /write-run-footer\.mjs/);
     assert.match(publisher, /const body = `\$\{description\}\$\{footer\}`/);
     assert.match(publisher, /const body = `\$\{report\}\$\{footer\}`/);

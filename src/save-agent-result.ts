@@ -21,6 +21,5 @@ const result = selectAgentResult(process.env.RESULT_JSON, executionMessages);
 const runMetadata = createRunMetadata(executionMessages, {
   model: process.env.MODEL || '',
   reasoningEffort: process.env.REASONING_EFFORT || '',
-  reviewDepth: process.env.REVIEW_DEPTH || '',
 });
 await writeFile(resultPath, JSON.stringify({ ...result, runMetadata }, null, 2));

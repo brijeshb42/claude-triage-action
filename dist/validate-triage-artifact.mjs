@@ -25,9 +25,6 @@ function isRecord2(value) {
 function isReasoningEffort(value) {
   return value === "low" || value === "medium" || value === "high" || value === "max";
 }
-function isReviewDepth(value) {
-  return value === "low" || value === "medium" || value === "high" || value === "xhigh" || value === "max";
-}
 function optionalNonNegativeNumber(value) {
   return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : void 0;
 }
@@ -38,7 +35,7 @@ function isRunMetadata(value) {
   if (!isRecord2(value)) {
     return false;
   }
-  return value.agent === "Claude Code" && typeof value.model === "string" && /^[A-Za-z0-9._-]+$/.test(value.model) && isReasoningEffort(value.reasoningEffort) && isReviewDepth(value.reviewDepth) && (value.turns === void 0 || optionalTurnCount(value.turns) !== void 0) && (value.durationMs === void 0 || optionalNonNegativeNumber(value.durationMs) !== void 0) && (value.costUsd === void 0 || optionalNonNegativeNumber(value.costUsd) !== void 0);
+  return value.agent === "Claude Code" && typeof value.model === "string" && /^[A-Za-z0-9._-]+$/.test(value.model) && isReasoningEffort(value.reasoningEffort) && (value.turns === void 0 || optionalTurnCount(value.turns) !== void 0) && (value.durationMs === void 0 || optionalNonNegativeNumber(value.durationMs) !== void 0) && (value.costUsd === void 0 || optionalNonNegativeNumber(value.costUsd) !== void 0);
 }
 
 // src/triage-artifact.ts

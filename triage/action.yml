@@ -35,9 +35,6 @@ inputs:
   reasoning-effort:
     description: Claude reasoning effort recorded in the published run footer.
     default: high
-  review-depth:
-    description: Investigation depth used by triage and recorded in the published run footer.
-    default: medium
   max-turns:
     description: Main-loop turn budget for read-only triage.
     default: '60'
@@ -141,9 +138,6 @@ runs:
           and a validation plan. Return `actionable` when a sandboxed fix attempt is reasonable,
           even if the probable cause still needs runtime verification.
 
-          Work at `${{ inputs.review-depth }}` review depth. This is separate from Claude's
-          `${{ inputs.reasoning-effort }}` reasoning-effort setting.
-
           You have a hard budget of ${{ inputs.max-turns }} main-loop turns. At roughly 80% of the
           budget, stop broad investigation and return the required structured result.
         claude_args: |
@@ -168,7 +162,6 @@ runs:
         ISSUE_NUMBER: ${{ inputs.issue-number }}
         MODEL: ${{ inputs.model }}
         REASONING_EFFORT: ${{ inputs.reasoning-effort }}
-        REVIEW_DEPTH: ${{ inputs.review-depth }}
         OUTPUT_DIRECTORY: ${{ runner.temp }}/claude-triage-artifact
         REPOSITORY: ${{ github.repository }}
         REPOSITORY_ID: ${{ github.repository_id }}

@@ -10,9 +10,6 @@ function isRecord(value) {
 function isReasoningEffort(value) {
   return value === "low" || value === "medium" || value === "high" || value === "max";
 }
-function isReviewDepth(value) {
-  return value === "low" || value === "medium" || value === "high" || value === "xhigh" || value === "max";
-}
 function optionalNonNegativeNumber(value) {
   return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : void 0;
 }
@@ -23,7 +20,7 @@ function isRunMetadata(value) {
   if (!isRecord(value)) {
     return false;
   }
-  return value.agent === "Claude Code" && typeof value.model === "string" && /^[A-Za-z0-9._-]+$/.test(value.model) && isReasoningEffort(value.reasoningEffort) && isReviewDepth(value.reviewDepth) && (value.turns === void 0 || optionalTurnCount(value.turns) !== void 0) && (value.durationMs === void 0 || optionalNonNegativeNumber(value.durationMs) !== void 0) && (value.costUsd === void 0 || optionalNonNegativeNumber(value.costUsd) !== void 0);
+  return value.agent === "Claude Code" && typeof value.model === "string" && /^[A-Za-z0-9._-]+$/.test(value.model) && isReasoningEffort(value.reasoningEffort) && (value.turns === void 0 || optionalTurnCount(value.turns) !== void 0) && (value.durationMs === void 0 || optionalNonNegativeNumber(value.durationMs) !== void 0) && (value.costUsd === void 0 || optionalNonNegativeNumber(value.costUsd) !== void 0);
 }
 function titleCase(value) {
   return value.charAt(0).toUpperCase() + value.slice(1);
@@ -45,7 +42,6 @@ function formatRunFooter(metadata, runUrl) {
   }
   const facts = [
     `${formatModel(metadata.model)} (${titleCase(metadata.reasoningEffort)})`,
-    `\`${metadata.reviewDepth}\` review depth`,
     metadata.turns === void 0 ? void 0 : `${metadata.turns} turns`,
     metadata.durationMs === void 0 ? void 0 : formatDuration(metadata.durationMs),
     metadata.costUsd === void 0 ? void 0 : `$${metadata.costUsd.toFixed(2)}`,

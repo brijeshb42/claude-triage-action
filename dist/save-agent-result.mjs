@@ -75,9 +75,6 @@ function isRecord2(value) {
 function isReasoningEffort(value) {
   return value === "low" || value === "medium" || value === "high" || value === "max";
 }
-function isReviewDepth(value) {
-  return value === "low" || value === "medium" || value === "high" || value === "xhigh" || value === "max";
-}
 function optionalNonNegativeNumber(value) {
   return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : void 0;
 }
@@ -95,9 +92,6 @@ function createRunMetadata(executionMessages2, configuration) {
   if (!isReasoningEffort(configuration.reasoningEffort)) {
     throw new Error(`Unsupported reasoning effort: ${configuration.reasoningEffort}`);
   }
-  if (!isReviewDepth(configuration.reviewDepth)) {
-    throw new Error(`Unsupported review depth: ${configuration.reviewDepth}`);
-  }
   const terminalResult = Array.isArray(executionMessages2) ? executionMessages2.findLast((message) => isRecord2(message) && message.type === "result") : void 0;
   const result2 = isRecord2(terminalResult) ? terminalResult : {};
   const turns = optionalTurnCount(result2.num_turns);
@@ -107,7 +101,6 @@ function createRunMetadata(executionMessages2, configuration) {
     agent: "Claude Code",
     model: validateModel(configuration.model),
     reasoningEffort: configuration.reasoningEffort,
-    reviewDepth: configuration.reviewDepth,
     ...turns === void 0 ? {} : { turns },
     ...durationMs === void 0 ? {} : { durationMs },
     ...costUsd === void 0 ? {} : { costUsd }
@@ -130,8 +123,7 @@ if (process.env.EXECUTION_FILE) {
 var result = selectAgentResult(process.env.RESULT_JSON, executionMessages);
 var runMetadata = createRunMetadata(executionMessages, {
   model: process.env.MODEL || "",
-  reasoningEffort: process.env.REASONING_EFFORT || "",
-  reviewDepth: process.env.REVIEW_DEPTH || ""
+  reasoningEffort: process.env.REASONING_EFFORT || ""
 });
 await writeFile(resultPath, JSON.stringify({ ...result, runMetadata }, null, 2));
 //# sourceMappingURL=save-agent-result.mjs.map

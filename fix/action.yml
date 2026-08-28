@@ -59,9 +59,6 @@ inputs:
   reasoning-effort:
     description: Claude reasoning effort recorded in the published run footer.
     default: high
-  review-depth:
-    description: Investigation depth used by the fix and recorded in the published run footer.
-    default: medium
   max-turns:
     description: Main-loop turn budget for the sandboxed fix.
     default: '200'
@@ -301,8 +298,6 @@ runs:
           sufficient; simulated interaction is not required. Do not rely on an indicator that can pass
           in both versions, and do not claim a released-package comparison unless you ran it.
 
-          Work at `${{ inputs.review-depth }}` review depth. This is separate from Claude's
-          `${{ inputs.reasoning-effort }}` reasoning-effort setting.
         claude_args: |
           --model ${{ inputs.model }}
           --effort ${{ inputs.reasoning-effort }}
@@ -322,7 +317,6 @@ runs:
         EXECUTION_FILE: ${{ steps.claude.outputs.execution_file }}
         MODEL: ${{ inputs.model }}
         REASONING_EFFORT: ${{ inputs.reasoning-effort }}
-        REVIEW_DEPTH: ${{ inputs.review-depth }}
         RESULT_JSON: ${{ steps.claude.outputs.structured_output }}
         RESULT_PATH: ${{ runner.temp }}/claude-fix/claude-triage-result.json
       run: |

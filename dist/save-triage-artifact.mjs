@@ -121,9 +121,6 @@ function isRecord2(value) {
 function isReasoningEffort(value) {
   return value === "low" || value === "medium" || value === "high" || value === "max";
 }
-function isReviewDepth(value) {
-  return value === "low" || value === "medium" || value === "high" || value === "xhigh" || value === "max";
-}
 function optionalNonNegativeNumber(value) {
   return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : void 0;
 }
@@ -141,9 +138,6 @@ function createRunMetadata(executionMessages2, configuration) {
   if (!isReasoningEffort(configuration.reasoningEffort)) {
     throw new Error(`Unsupported reasoning effort: ${configuration.reasoningEffort}`);
   }
-  if (!isReviewDepth(configuration.reviewDepth)) {
-    throw new Error(`Unsupported review depth: ${configuration.reviewDepth}`);
-  }
   const terminalResult = Array.isArray(executionMessages2) ? executionMessages2.findLast((message) => isRecord2(message) && message.type === "result") : void 0;
   const result2 = isRecord2(terminalResult) ? terminalResult : {};
   const turns = optionalTurnCount(result2.num_turns);
@@ -153,7 +147,6 @@ function createRunMetadata(executionMessages2, configuration) {
     agent: "Claude Code",
     model: validateModel(configuration.model),
     reasoningEffort: configuration.reasoningEffort,
-    reviewDepth: configuration.reviewDepth,
     ...turns === void 0 ? {} : { turns },
     ...durationMs === void 0 ? {} : { durationMs },
     ...costUsd === void 0 ? {} : { costUsd }
@@ -190,8 +183,7 @@ if (process.env.EXECUTION_FILE) {
 var result = selectTriageResult(process.env.RESULT_JSON, executionMessages);
 var runMetadata = createRunMetadata(executionMessages, {
   model: requiredEnvironment("MODEL"),
-  reasoningEffort: requiredEnvironment("REASONING_EFFORT"),
-  reviewDepth: requiredEnvironment("REVIEW_DEPTH")
+  reasoningEffort: requiredEnvironment("REASONING_EFFORT")
 });
 var outputDirectory = path.resolve(requiredEnvironment("OUTPUT_DIRECTORY"));
 var createdAt = /* @__PURE__ */ new Date();

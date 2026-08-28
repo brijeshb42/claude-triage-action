@@ -17,7 +17,6 @@ describe('createRunMetadata', () => {
       {
         model: 'claude-opus-5',
         reasoningEffort: 'high',
-        reviewDepth: 'medium',
       },
     );
 
@@ -25,7 +24,6 @@ describe('createRunMetadata', () => {
       agent: 'Claude Code',
       model: 'claude-opus-5',
       reasoningEffort: 'high',
-      reviewDepth: 'medium',
       turns: 57,
       durationMs: 707_000,
       costUsd: 6.5,
@@ -39,7 +37,6 @@ describe('createRunMetadata', () => {
       {
         model: 'claude-sonnet-4-6',
         reasoningEffort: 'high',
-        reviewDepth: 'medium',
       },
     );
 
@@ -56,7 +53,6 @@ describe('formatRunFooter', () => {
         agent: 'Claude Code',
         model: 'claude-opus-5',
         reasoningEffort: 'high',
-        reviewDepth: 'medium',
         turns: 57,
         durationMs: 707_000,
         costUsd: 6.5,
@@ -66,7 +62,7 @@ describe('formatRunFooter', () => {
 
     assert.equal(
       footer,
-      '\n\n---\n\n_🤖 Review generated with Claude Code · Opus 5 (High) · `medium` review depth · 57 turns · 11m47s · $6.50 · [run](https://github.com/example/project/actions/runs/123)_',
+      '\n\n---\n\n_🤖 Review generated with Claude Code · Opus 5 (High) · 57 turns · 11m47s · $6.50 · [run](https://github.com/example/project/actions/runs/123)_',
     );
   });
 });

@@ -124,10 +124,11 @@ build on a GitHub-hosted runner. Add a scoped `CLOUDFLARE_API_TOKEN` secret, set
 `CLOUDFLARE_ACCOUNT_ID` variable, and set `CLOUDFLARE_DEPLOY_ENABLED=true` only while a
 deployment is intended.
 
-The container image is pinned to the same version as `@cloudflare/sandbox` and adds the
-Node.js and pnpm versions used by MUI. The deployed container uses Cloudflare's
-`standard-1` instance type (4 GiB memory and 8 GB disk) so large repositories have room for
-dependency installation and build output.
+The container image is pinned to the same version as `@cloudflare/sandbox`, adds the Node.js
+version used by MUI, and copies pnpm's independently versioned standalone binary from its
+official image. The deployed container uses Cloudflare's `standard-1` instance type (4 GiB
+memory and 8 GB disk) so large repositories have room for dependency installation and build
+output.
 
 ### Repository Node.js version
 

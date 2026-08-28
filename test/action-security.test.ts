@@ -3,12 +3,21 @@ import { readFile } from 'node:fs/promises';
 import { describe, it } from 'node:test';
 
 const actionPath = new URL('../action.yml', import.meta.url);
+const bridgeDockerfilePath = new URL('../bridge/Dockerfile', import.meta.url);
 const fixActionPath = new URL('../fix/action.yml', import.meta.url);
 const publisherPath = new URL('../publish/action.yml', import.meta.url);
 const reporterPath = new URL('../report/action.yml', import.meta.url);
 const triageActionPath = new URL('../triage/action.yml', import.meta.url);
 
 describe('triage action isolation', () => {
+  it('installs the pinned standalone pnpm image without Corepack', async () => {
+    const dockerfile = await readFile(bridgeDockerfilePath, 'utf8');
+
+    assert.match(dockerfile, /^FROM ghcr\.io\/pnpm\/pnpm:11\.22\.0@sha256:[a-f0-9]{64} AS pnpm$/m);
+    assert.match(dockerfile, /^COPY --from=pnpm \/pnpm \/pnpm$/m);
+    assert.doesNotMatch(dockerfile, /corepack/i);
+  });
+
   it('provides valid JSON schemas to Claude', async () => {
     const actionFiles = [actionPath, fixActionPath, triageActionPath];
 

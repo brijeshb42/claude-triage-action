@@ -93,7 +93,7 @@ test(
           name: 'runner-fixture',
           private: true,
           packageManager: 'pnpm@11.24.0',
-          engines: { pnpm: '11.24.0' },
+          engines: { pnpm: '11.24.0', node: '24.0.0' },
           scripts: { preinstall: 'npx --yes only-allow@1.2.1 pnpm' },
         }),
       );
@@ -115,7 +115,8 @@ test(
         maxTokens: 16384,
         timeoutMs: 120_000,
         installTimeoutMs: 120_000,
-        installCommand: 'test "$(pnpm --version)" = 11.24.0 && pnpm install --lockfile=false',
+        installCommand:
+          'test "$(node --version)" = v24.0.0 && test "$(pnpm --version)" = 11.24.0 && pnpm install --lockfile=false',
         snapshotExcludes: [],
       };
       await runRunner(options, () =>
@@ -124,7 +125,7 @@ test(
           maxRequests: options.maxRequests,
           maxTokens: options.maxTokens,
           credential: async () => ({ headers: { 'x-api-key': 'host-canary-key' } }),
-          request: createFixtureApi(),
+          request: createFixtureApi('v24.0.0'),
         }),
       );
       const result = JSON.parse(
@@ -132,6 +133,10 @@ test(
       );
       assert.equal(result.fixComplete, true);
       assert.equal(result.previewReady, false);
+      assert.equal(
+        JSON.parse(await readFile(path.join(outputDirectory, 'runner-node.json'), 'utf8')).version,
+        '24.0.0',
+      );
       const patch = await readFile(path.join(outputDirectory, 'claude-triage.patch'), 'utf8');
       assert.match(patch, /\+fixed/);
       assert.doesNotMatch(patch, /host-canary-key/);

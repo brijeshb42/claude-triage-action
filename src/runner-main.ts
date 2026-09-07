@@ -12,6 +12,7 @@ import { createRunnerCredentialProvider } from './runner-auth.js';
 import { startRunnerGateway, type RunnerGateway } from './runner-gateway.js';
 import { RunnerNetwork } from './runner-network.js';
 import { runProcess } from './runner-process.js';
+import { prepareRunnerNode, RUNNER_SYSTEM_PATH } from './runner-node.js';
 
 // The only host bind is this credential-free, read-only resolver configuration.
 export const RUNNER_RESOLVER_PATH = fileURLToPath(
@@ -31,6 +32,7 @@ export interface RunnerOptions {
   timeoutMs: number;
   installTimeoutMs: number;
   installCommand: string;
+  repositoryNodeVersion?: string;
   snapshotExcludes: string[];
 }
 
@@ -159,8 +161,21 @@ export async function runRunner(
     }
     return result.stdout;
   };
+  let repositoryPath = RUNNER_SYSTEM_PATH;
   const exec = (args: string[], extra: Parameters<typeof runProcess>[2] = {}) =>
-    docker(['exec', '-i', '--workdir', '/workspace/repo', container, ...args], extra);
+    docker(
+      [
+        'exec',
+        '-i',
+        '--workdir',
+        '/workspace/repo',
+        '--env',
+        `PATH=${repositoryPath}`,
+        container,
+        ...args,
+      ],
+      extra,
+    );
   await mkdir(options.outputDirectory, { recursive: true });
   await writeFile(path.join(options.outputDirectory, 'claude-triage.patch'), '');
   try {
@@ -246,6 +261,23 @@ export async function runRunner(
       'set -euo pipefail\ngit init -b claude-runner-base .\ngit config user.name "Claude Runner"\ngit config user.email "claude-runner@users.noreply.github.com"\ngit -c core.hooksPath=/dev/null add --force .\ngit -c core.hooksPath=/dev/null commit -m "sandbox baseline"',
     ]);
     const packageJson = await optionalFile(options.repositoryDirectory, 'package.json');
+    const runtime = await prepareRunnerNode(
+      {
+        packageJson: packageJson || '',
+        nodeVersionFile: (await optionalFile(options.repositoryDirectory, '.node-version')) || '',
+        nvmrc: (await optionalFile(options.repositoryDirectory, '.nvmrc')) || '',
+      },
+      options.repositoryNodeVersion || 'auto',
+      (args) => exec(args, { timeoutMs: 300_000 }),
+    );
+    repositoryPath = `${runtime.binPath}:${RUNNER_SYSTEM_PATH}`;
+    console.log(
+      `Repository Node.js ${runtime.version} selected from ${runtime.requirement.source}.`,
+    );
+    await writeFile(
+      path.join(options.outputDirectory, 'runner-node.json'),
+      JSON.stringify(runtime),
+    );
     const plan = detectDependencyInstallPlan(
       {
         ...(packageJson ? { packageJson } : {}),
@@ -274,6 +306,8 @@ export async function runRunner(
         '-i',
         '--workdir',
         '/workspace/repo',
+        '--env',
+        `PATH=${repositoryPath}`,
         '--env',
         `ANTHROPIC_BASE_URL=http://${network.gateway}:${gateway.port}`,
         '--env',
@@ -465,6 +499,7 @@ async function main(): Promise<void> {
     timeoutMs: integer('RUNNER_TIMEOUT_MS', 1_800_000, 10_800_000),
     installTimeoutMs: integer('RUNNER_INSTALL_TIMEOUT_MS', 1_200_000, 3_600_000),
     installCommand: process.env.RUNNER_INSTALL_COMMAND || 'auto',
+    repositoryNodeVersion: process.env.RUNNER_REPOSITORY_NODE_VERSION || 'auto',
     snapshotExcludes: (process.env.RUNNER_SNAPSHOT_EXCLUDES || '')
       .split(/\r?\n/)
       .map((line) => line.trim())

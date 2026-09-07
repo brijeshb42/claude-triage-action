@@ -21,7 +21,7 @@ const result: AgentResult = {
 };
 
 /** Deterministic, offline API implementation for exercising the real Claude CLI. */
-export function createFixtureApi(): typeof fetch {
+export function createFixtureApi(expectedNode?: string): typeof fetch {
   let messages = 0;
   let usedBash = false;
   let usedStructuredOutput = false;
@@ -57,7 +57,7 @@ export function createFixtureApi(): typeof fetch {
         id: `toolu_fixture_bash_${messages}`,
         name: bash.name,
         input: {
-          command: `pnpm --version > /dev/null && printf 'fixed\\n' > fixture.txt && node -e 'require("node:assert/strict").equal(require("node:fs").readFileSync("fixture.txt", "utf8"), "fixed\\n")'`,
+          command: `${expectedNode ? `test "$(node --version)" = ${expectedNode} && ` : ''}pnpm --version > /dev/null && printf 'fixed\\n' > fixture.txt && node -e 'require("node:assert/strict").equal(require("node:fs").readFileSync("fixture.txt", "utf8"), "fixed\\n")'`,
           description: 'Fix fixture.txt and validate its exact contents',
           timeout: 10000,
         },

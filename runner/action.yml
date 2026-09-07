@@ -56,6 +56,12 @@ inputs:
   agent-timeout-ms:
     description: Entire Claude invocation deadline, including tool execution.
     default: '1800000'
+  node-version:
+    description: Node.js version for the trusted supervisor runtime.
+    default: '26.x'
+  repository-node-version:
+    description: Sandbox Node.js semver override, or auto to detect the repository's minimum supported version.
+    default: auto
 
 outputs:
   artifact-name:
@@ -68,20 +74,21 @@ runs:
     - name: Set up the trusted supervisor runtime
       uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
       with:
-        node-version: 22.23.2
+        node-version: ${{ inputs.node-version }}
 
     - name: Install the pinned gVisor runtime
       shell: bash
       run: bash "$GITHUB_ACTION_PATH/install-runsc.sh"
 
-    - name: Build the credential-free agent image
+    - name: Pull the pinned credential-free agent image
       id: image
       shell: bash
       run: |
         set -euo pipefail
-        image_file="$(mktemp "$RUNNER_TEMP/claude-runner-image.XXXXXX")"
-        docker build --iidfile "$image_file" "$GITHUB_ACTION_PATH"
-        echo "id=$(cat "$image_file")" >> "$GITHUB_OUTPUT"
+        image="$(cat "$GITHUB_ACTION_PATH/image.txt")"
+        [[ "$image" =~ ^ghcr\.io/brijeshb42/claude-triage-runner@sha256:[a-f0-9]{64}$ ]]
+        docker pull "$image"
+        echo "id=$image" >> "$GITHUB_OUTPUT"
 
     - name: Run the isolated issue analysis and fix
       id: agent
@@ -98,6 +105,7 @@ runs:
         RUNNER_REPOSITORY_DIRECTORY: ${{ inputs.working-directory }}
         RUNNER_SNAPSHOT_EXCLUDES: ${{ inputs.snapshot-excludes }}
         RUNNER_INSTALL_COMMAND: ${{ inputs.dependency-install-command }}
+        RUNNER_REPOSITORY_NODE_VERSION: ${{ inputs.repository-node-version }}
         RUNNER_INSTALL_TIMEOUT_MS: ${{ inputs.dependency-install-timeout-ms }}
         RUNNER_MODEL: ${{ inputs.model }}
         RUNNER_EFFORT: ${{ inputs.reasoning-effort }}

@@ -38,8 +38,15 @@ appropriately scoped GitHub App token only to the publisher.
   build files live outside the source tree in the disposable workspace volume,
   where execution is allowed and files survive container process restarts.
   npm's cache uses that volume too, for repository preinstall hooks using `npx`.
-  Repository Node auto-selection is not implemented in this independent action.
-  Use repositories compatible with that runtime. npm and Yarn lockfiles are
+  `repository-node-version: auto` selects the minimum published Linux x64 Node
+  matching `package.json#engines.node`, then `.node-version`, `.nvmrc`, or
+  `package.json#volta.node` (in that order), falling back to the image version.
+  Supply a semver value to override detection. Non-semver aliases such as
+  `lts/*` are unsupported. If needed, the action downloads and SHA-256 verifies
+  official Node inside gVisor, before dependency installation. Its directory
+  lives outside the repo and stays on PATH for Claude's tools across restarts.
+  The separate `node-version` input controls only the host supervisor (26.x).
+  npm and Yarn lockfiles are
   recognized; custom install commands are supported inside the sandbox.
 - Preview publication and cross-run dependency caches are disabled. Only a
   successfully completed agent session claiming a completed fix exports a patch.
@@ -96,6 +103,17 @@ Anthropic/GitHub secrets or paid inference. The fixture supplies fake Anthropic
 responses to the actual pinned Claude CLI and verifies artifact collection.
 Live federation and a real issue fix additionally require the configured
 `runner-example.yml` workflow.
+
+### Prebuilt image releases
+
+Issue runs pull the public GHCR image pinned by digest in `runner/image.txt`;
+they never build it or need registry credentials. A fresh hosted runner still
+downloads its layers. The separate `runner-image.yml` workflow builds and
+publishes only when image inputs change (or on manual dispatch). Its artifact
+and job summary contain the new digest. Update `runner/image.txt`, run the
+gVisor CI against it, and pin consumers to that tested action commit. Existing
+action commits keep their original image, even after a new image is published.
+The image publication job has package-write access but no model access.
 
 Authentication follows the pinned
 [Anthropic action](https://github.com/anthropics/claude-code-action/blob/c81e3bc69d1b18badbb63ba39581218f02421678/base-action/src/workload-identity.ts)

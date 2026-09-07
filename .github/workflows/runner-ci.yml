@@ -39,8 +39,12 @@ jobs:
           git diff --exit-code -- dist
       - name: Install the pinned gVisor distribution
         run: bash runner/install-runsc.sh
-      - name: Build the independent agent image
-        run: docker build --tag claude-runner-ci runner
+      - name: Pull the published image anonymously
+        run: |
+          set -euo pipefail
+          image="$(cat runner/image.txt)"
+          docker --config "$(mktemp -d)" pull "$image"
+          docker tag "$image" claude-runner-ci
       - name: Test actual gVisor with the real CLI and a fake model
         env:
           RUNNER_INTEGRATION: '1'

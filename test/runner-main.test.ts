@@ -66,6 +66,18 @@ test('bounded process capture preserves output without interpreting workflow com
   assert.equal(result.stdout, '::error::untrusted\n');
 });
 
+test('runner consumes a prebuilt digest without package-write permissions or a build', async () => {
+  const action = parse(await readFile('runner/action.yml', 'utf8'));
+  const image = action.runs.steps.find((step: { id?: string }) => step.id === 'image');
+  assert.match(image.run, /docker pull/);
+  assert.doesNotMatch(image.run, /docker build|docker login/);
+  assert.match(
+    (await readFile('runner/image.txt', 'utf8')).trim(),
+    /^ghcr\.io\/brijeshb42\/claude-triage-runner@sha256:[a-f0-9]{64}$/,
+  );
+  assert.equal(action.inputs['repository-node-version'].default, 'auto');
+});
+
 test('bounded process capture rejects truncation, timeout and cancellation', async () => {
   await assert.rejects(
     runProcess(process.execPath, ['-e', 'console.log("x".repeat(1000))'], { maxBytes: 50 }),

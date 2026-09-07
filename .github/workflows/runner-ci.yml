@@ -1,0 +1,43 @@
+name: Runner sandbox CI
+
+on:
+  pull_request:
+    paths:
+      - 'runner/**'
+      - 'src/runner-*.ts'
+      - 'test/runner-*.test.ts'
+      - 'test/fixtures/runner-*'
+      - 'dist/runner-*'
+      - '.github/workflows/runner-ci.yml'
+  push:
+    branches: [main, prototype, runner-native-sandbox]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  gvisor:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
+        with:
+          version: 11.22.0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22.23.2
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Install the pinned gVisor distribution
+        run: bash runner/install-runsc.sh
+      - name: Build the independent agent image
+        run: docker build --tag claude-runner-ci runner
+      - name: Test actual gVisor with the real CLI and a fake model
+        env:
+          RUNNER_INTEGRATION: '1'
+          RUNNER_TEST_IMAGE: claude-runner-ci
+        run: pnpm exec tsx --test test/runner-integration.test.ts

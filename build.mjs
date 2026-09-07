@@ -12,6 +12,11 @@ const shared = {
 await Promise.all([
   build({
     ...shared,
+    entryPoints: ['src/runner-main.ts'],
+    outfile: 'dist/runner-main.mjs',
+  }),
+  build({
+    ...shared,
     entryPoints: ['src/sandbox-cli.ts'],
     outfile: 'dist/sandbox-cli.mjs',
   }),

@@ -1,0 +1,117 @@
+name: Runner-sandboxed Claude issue fix
+description: Analyze and fix an issue with Claude Code inside gVisor, exporting an untrusted artifact for a separate publisher.
+
+inputs:
+  github-token:
+    description: Read-only token for capturing the issue; never sent into the sandbox.
+    required: true
+  issue-number:
+    description: Issue to analyze and attempt to fix.
+    required: true
+  artifact-name:
+    description: Unique result artifact name for the separate runner/publish action.
+    required: true
+  anthropic-api-key:
+    description: Host-only API key; use either this or the federation inputs.
+    default: ''
+  anthropic-federation-rule-id:
+    description: Host-only Anthropic GitHub OIDC federation rule ID.
+    default: ''
+  anthropic-organization-id:
+    description: Anthropic organization ID for federation.
+    default: ''
+  anthropic-service-account-id:
+    description: Anthropic service account ID for federation.
+    default: ''
+  anthropic-workspace-id:
+    description: Anthropic workspace ID for federation.
+    default: ''
+  working-directory:
+    description: Clean tracked checkout of a trusted base commit. Repository code executes only in gVisor.
+    default: .
+  snapshot-excludes:
+    description: Newline-separated repository-relative Git pathspecs excluded from the source snapshot.
+    default: ''
+  dependency-install-command:
+    description: auto detects a lockfile; none skips; other values run as a command inside gVisor.
+    default: auto
+  dependency-install-timeout-ms:
+    description: Dependency installation deadline in milliseconds.
+    default: '1200000'
+  model:
+    description: Exact Anthropic model ID; the gateway rejects all other models.
+    default: claude-sonnet-4-6
+  reasoning-effort:
+    description: Claude reasoning effort.
+    default: high
+  max-turns:
+    description: Claude main-loop turn limit.
+    default: '100'
+  max-api-requests:
+    description: Host-enforced upstream request ceiling, including retries and token counting.
+    default: '200'
+  max-output-tokens-per-request:
+    description: Host-enforced per-request output token ceiling, also configured in Claude.
+    default: '16384'
+  agent-timeout-ms:
+    description: Entire Claude invocation deadline, including tool execution.
+    default: '1800000'
+
+outputs:
+  artifact-name:
+    description: Untrusted patch/result artifact for the publisher job.
+    value: ${{ inputs.artifact-name }}
+
+runs:
+  using: composite
+  steps:
+    - name: Set up the trusted supervisor runtime
+      uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      with:
+        node-version: 22.23.2
+
+    - name: Install the pinned gVisor runtime
+      shell: bash
+      run: bash "$GITHUB_ACTION_PATH/install-runsc.sh"
+
+    - name: Build the credential-free agent image
+      id: image
+      shell: bash
+      run: |
+        set -euo pipefail
+        image_file="$(mktemp "$RUNNER_TEMP/claude-runner-image.XXXXXX")"
+        docker build --iidfile "$image_file" "$GITHUB_ACTION_PATH"
+        echo "id=$(cat "$image_file")" >> "$GITHUB_OUTPUT"
+
+    - name: Run the isolated issue analysis and fix
+      id: agent
+      shell: bash
+      env:
+        RUNNER_IMAGE: ${{ steps.image.outputs.id }}
+        RUNNER_GITHUB_TOKEN: ${{ inputs.github-token }}
+        RUNNER_ISSUE_NUMBER: ${{ inputs.issue-number }}
+        RUNNER_ANTHROPIC_API_KEY: ${{ inputs.anthropic-api-key }}
+        RUNNER_FEDERATION_RULE_ID: ${{ inputs.anthropic-federation-rule-id }}
+        RUNNER_ORGANIZATION_ID: ${{ inputs.anthropic-organization-id }}
+        RUNNER_SERVICE_ACCOUNT_ID: ${{ inputs.anthropic-service-account-id }}
+        RUNNER_WORKSPACE_ID: ${{ inputs.anthropic-workspace-id }}
+        RUNNER_REPOSITORY_DIRECTORY: ${{ inputs.working-directory }}
+        RUNNER_SNAPSHOT_EXCLUDES: ${{ inputs.snapshot-excludes }}
+        RUNNER_INSTALL_COMMAND: ${{ inputs.dependency-install-command }}
+        RUNNER_INSTALL_TIMEOUT_MS: ${{ inputs.dependency-install-timeout-ms }}
+        RUNNER_MODEL: ${{ inputs.model }}
+        RUNNER_EFFORT: ${{ inputs.reasoning-effort }}
+        RUNNER_MAX_TURNS: ${{ inputs.max-turns }}
+        RUNNER_MAX_REQUESTS: ${{ inputs.max-api-requests }}
+        RUNNER_MAX_TOKENS: ${{ inputs.max-output-tokens-per-request }}
+        RUNNER_TIMEOUT_MS: ${{ inputs.agent-timeout-ms }}
+      run: node "$GITHUB_ACTION_PATH/../dist/runner-main.mjs"
+
+    - name: Upload the untrusted result and patch
+      if: always() && steps.agent.outputs.artifact-directory != ''
+      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      with:
+        name: ${{ inputs.artifact-name }}
+        path: ${{ steps.agent.outputs.artifact-directory }}
+        if-no-files-found: error
+        retention-days: 1

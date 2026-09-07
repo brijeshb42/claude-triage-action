@@ -37,6 +37,7 @@ appropriately scoped GitHub App token only to the publisher.
   `packageManager` field. Its managed CLI, package store, cache, and temporary
   build files live outside the source tree in the disposable workspace volume,
   where execution is allowed and files survive container process restarts.
+  npm's cache uses that volume too, for repository preinstall hooks using `npx`.
   Repository Node auto-selection is not implemented in this independent action.
   Use repositories compatible with that runtime. npm and Yarn lockfiles are
   recognized; custom install commands are supported inside the sandbox.

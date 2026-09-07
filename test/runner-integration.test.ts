@@ -93,6 +93,7 @@ test(
           private: true,
           packageManager: 'pnpm@11.24.0',
           engines: { pnpm: '11.24.0' },
+          scripts: { preinstall: 'npx --yes only-allow@1.2.1 pnpm' },
         }),
       );
       await command('git', ['init', '-b', 'main'], directory);
@@ -112,8 +113,8 @@ test(
         maxRequests: 20,
         maxTokens: 16384,
         timeoutMs: 120_000,
-        installTimeoutMs: 30_000,
-        installCommand: 'test "$(pnpm --version)" = 11.24.0',
+        installTimeoutMs: 120_000,
+        installCommand: 'test "$(pnpm --version)" = 11.24.0 && pnpm install --lockfile=false',
         snapshotExcludes: [],
       };
       await runRunner(options, () =>

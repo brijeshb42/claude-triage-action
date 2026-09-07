@@ -15,7 +15,8 @@ COPY mcp.json /opt/runner/mcp.json
 ENV XDG_DATA_HOME=/workspace/.runner-data
 ENV XDG_CACHE_HOME=/workspace/.runner-cache
 ENV TMPDIR=/workspace/.runner-tmp
-RUN mkdir -p /workspace/.runner-data /workspace/.runner-cache /workspace/.runner-tmp /home/node/.claude \
+ENV npm_config_cache=/workspace/.runner-npm-cache
+RUN mkdir -p /workspace/.runner-data /workspace/.runner-cache /workspace/.runner-tmp /workspace/.runner-npm-cache /home/node/.claude \
     && chown -R node:node /workspace /home/node/.claude
 USER node
 WORKDIR /workspace

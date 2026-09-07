@@ -7,6 +7,12 @@ import { SandboxBridgeClient } from './bridge-client.js';
 import { loadBridgeEnvironment } from './config.js';
 import { installRepositoryDependencies } from './dependency-install.js';
 import { prepareNodeRuntime } from './node-runtime.js';
+import { PREVIEW_CONFIG_PATH, parsePreviewConfig } from './preview-config.js';
+import {
+  describePreviewValidation,
+  validatePreview,
+  type PreviewValidationOutcome,
+} from './preview-validation.js';
 
 const HYDRATE_ATTEMPTS = 3;
 const HYDRATE_ARCHIVE_PATH = '/workspace/.claude-triage-repository.tar.gz';
@@ -215,6 +221,51 @@ export async function hydrateRepositoryArchive(
   await cleanupHydrationFiles(client, sandboxId);
 }
 
+async function readOptionalFile(filePath: string): Promise<string | undefined> {
+  try {
+    return await readFile(filePath, 'utf8');
+  } catch (error) {
+    if (typeof error === 'object' && error !== null && 'code' in error && error.code === 'ENOENT') {
+      return undefined;
+    }
+    throw error;
+  }
+}
+
+/**
+ * Re-run the repository-owned preview validation after Claude finishes. The config comes
+ * from the trusted runner checkout, never from the sandbox the model edited.
+ */
+async function runPreviewValidation(
+  client: SandboxBridgeClient,
+  sandboxId: string,
+  repositoryDirectory: string,
+  nodeBinPath: string,
+  previewDirectory: string,
+  timeoutMs: number,
+): Promise<PreviewValidationOutcome> {
+  if (!previewDirectory) {
+    return { status: 'skipped', reason: 'no preview directory is configured' };
+  }
+
+  const configText = await readOptionalFile(path.join(repositoryDirectory, PREVIEW_CONFIG_PATH));
+  if (configText === undefined) {
+    return { status: 'skipped', reason: `${PREVIEW_CONFIG_PATH} does not exist` };
+  }
+  const config = parsePreviewConfig(configText);
+  if (!config) {
+    return { status: 'skipped', reason: `${PREVIEW_CONFIG_PATH} configures no preview` };
+  }
+  if (config.directory !== previewDirectory) {
+    throw new Error(
+      `${PREVIEW_CONFIG_PATH} configures preview directory ${JSON.stringify(config.directory)} ` +
+        `but the action received ${JSON.stringify(previewDirectory)}.`,
+    );
+  }
+
+  return validatePreview(client, sandboxId, nodeBinPath, config, timeoutMs);
+}
+
 async function main(): Promise<void> {
   const [command, ...args] = process.argv.slice(2);
   const bridge = loadBridgeEnvironment();
@@ -298,6 +349,26 @@ async function main(): Promise<void> {
     return;
   }
 
+  if (command === 'validate-preview') {
+    const sandboxId = requiredArgument(args[0], 'sandbox ID');
+    const repositoryDirectory = path.resolve(requiredArgument(args[1], 'repository directory'));
+    const nodeBinPath = requiredArgument(args[2], 'Node.js binary path');
+    const previewDirectory = (args[3] ?? '').trim().replace(/\/+$/, '');
+    const timeoutMs = positiveInteger(args[4] || '600000', 'preview validation timeout');
+    const outputPath = path.resolve(requiredArgument(args[5], 'validation output path'));
+    const outcome = await runPreviewValidation(
+      client,
+      sandboxId,
+      repositoryDirectory,
+      nodeBinPath,
+      previewDirectory,
+      timeoutMs,
+    );
+    await writeFile(outputPath, JSON.stringify(outcome, null, 2));
+    process.stderr.write(`${describePreviewValidation(outcome)}\n`);
+    return;
+  }
+
   if (command === 'export-patch') {
     const sandboxId = requiredArgument(args[0], 'sandbox ID');
     const outputPath = path.resolve(requiredArgument(args[1], 'patch output path'));
@@ -365,7 +436,7 @@ async function main(): Promise<void> {
   }
 
   throw new Error(
-    'Usage: sandbox-cli <create|destroy|hydrate-worktree|prepare-node|install-dependencies|upload-issue-context|upload-triage-context|export-patch|mcp-config> [...args]',
+    'Usage: sandbox-cli <create|destroy|hydrate-worktree|prepare-node|install-dependencies|upload-issue-context|upload-triage-context|validate-preview|export-patch|mcp-config> [...args]',
   );
 }
 

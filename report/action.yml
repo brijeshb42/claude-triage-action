@@ -84,6 +84,11 @@ runs:
             '**Evidence:**',
             ...result.evidence.map((item) => `- ${item}`),
             '',
+            '**Validation plan:**',
+            ...(result.validationPlan.length
+              ? result.validationPlan.map((item) => `- [ ] ${item}`)
+              : ['- None proposed.']),
+            '',
             status,
             '',
             '**Validation:** Read-only triage only; no repository commands or tests were run.',

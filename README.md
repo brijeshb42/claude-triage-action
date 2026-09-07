@@ -74,6 +74,12 @@ allows an MCP tool to run for roughly 28 hours, which is unsuitable for a CI job
 sandbox becomes unreachable. Bridge HTTP requests also stop shortly after their corresponding
 sandbox command deadline so cleanup cannot consume the rest of the job indefinitely.
 
+After Claude finishes, the fix action re-runs the preview validation commands from the
+repository's `.github/claude-triage.yml` inside the sandbox. The model's `previewReady` claim is
+honored only when that deterministic run passes, so a preview edited after its last successful
+build is dropped by the publisher instead of shipped. Both agent stages also print a per-turn tool
+timeline to the job log and step summary, so a run can be audited without full model output.
+
 Before Claude starts, the fix action installs dependencies in a dedicated sandbox setup
 step. `dependency-install-command: auto` recognizes pnpm, npm, and Yarn lockfiles;
 `none` disables the step, and any other value is used as an explicit repository command.

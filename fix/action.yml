@@ -53,6 +53,9 @@ inputs:
   preview-directory:
     description: Repository-relative disposable preview project allowed in the patch.
     default: ''
+  preview-validation-timeout-ms:
+    description: Maximum time allowed for each configured preview validation command after Claude finishes.
+    default: '600000'
   model:
     description: Claude model used for the sandboxed fix.
     default: claude-sonnet-4-6
@@ -297,6 +300,9 @@ runs:
           the fixed workspace package that pkg.pr.new will publish. A clear manual reproduction is
           sufficient; simulated interaction is not required. Do not rely on an indicator that can pass
           in both versions, and do not claim a released-package comparison unless you ran it.
+          After this session a deterministic step re-runs the configured preview validation
+          commands; `previewReady` is only honored when they pass, so leave the preview in a
+          state that builds.
 
         claude_args: |
           --model ${{ inputs.model }}
@@ -310,12 +316,34 @@ runs:
           --json-schema '{"type":"object","additionalProperties":false,"required":["summary","probableCause","confidence","fixAttempted","fixComplete","prTitle","prBody","validation","previewAttempted","previewReady","previewValidation"],"properties":{"summary":{"type":"string"},"probableCause":{"type":"string"},"confidence":{"type":"string","enum":["low","medium","high"]},"fixAttempted":{"type":"boolean"},"fixComplete":{"type":"boolean"},"prTitle":{"type":"string"},"prBody":{"type":"string"},"validation":{"type":"string"},"previewAttempted":{"type":"boolean"},"previewReady":{"type":"boolean"},"previewValidation":{"type":"string"}}}'
           --max-turns ${{ inputs.max-turns }}
 
+    - name: Validate the preview deterministically after Claude
+      if: always() && steps.setup.outputs.sandbox-id != ''
+      continue-on-error: true
+      shell: bash
+      env:
+        PREVIEW_DIRECTORY: ${{ inputs.preview-directory }}
+        PREVIEW_VALIDATION_PATH: ${{ runner.temp }}/claude-fix/preview-validation.json
+        PREVIEW_VALIDATION_TIMEOUT_MS: ${{ inputs.preview-validation-timeout-ms }}
+        REPOSITORY_DIRECTORY: ${{ inputs.working-directory }}
+        SANDBOX_API_KEY: ${{ inputs.sandbox-api-key }}
+        SANDBOX_API_URL: ${{ inputs.sandbox-api-url }}
+      run: |
+        mkdir -p "$(dirname "$PREVIEW_VALIDATION_PATH")"
+        node "$GITHUB_ACTION_PATH/../dist/sandbox-cli.mjs" validate-preview \
+          "${{ steps.setup.outputs.sandbox-id }}" \
+          "$REPOSITORY_DIRECTORY" \
+          "${{ steps.setup.outputs.node-bin }}" \
+          "$PREVIEW_DIRECTORY" \
+          "$PREVIEW_VALIDATION_TIMEOUT_MS" \
+          "$PREVIEW_VALIDATION_PATH"
+
     - name: Save fix result
       if: always() && steps.setup.outputs.sandbox-id != ''
       shell: bash
       env:
         EXECUTION_FILE: ${{ steps.claude.outputs.execution_file }}
         MODEL: ${{ inputs.model }}
+        PREVIEW_VALIDATION_PATH: ${{ runner.temp }}/claude-fix/preview-validation.json
         REASONING_EFFORT: ${{ inputs.reasoning-effort }}
         RESULT_JSON: ${{ steps.claude.outputs.structured_output }}
         RESULT_PATH: ${{ runner.temp }}/claude-fix/claude-triage-result.json

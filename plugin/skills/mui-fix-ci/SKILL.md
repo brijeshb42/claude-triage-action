@@ -19,16 +19,19 @@ plane; every repository operation happens through the sandbox MCP.
 4. If a small, defensible fix is clear, first add or adjust the narrowest regression test, then
    implement the fix. Avoid unrelated cleanup, generated files, dependency changes, lockfile churn,
    GitHub workflows, Git attributes, submodules, and symbolic links.
-5. Run focused validation. Do not claim a command passed unless its exit code is zero. If documented
-   dependencies are missing, the repository's install command may run inside the credential-free
-   sandbox.
+5. Run focused validation. Prefer the narrowest documented command that runs only in Node or jsdom;
+   browser test projects need browsers the sandbox does not have. Do not claim a command passed
+   unless its exit code is zero. If documented dependencies are missing, the repository's install
+   command may run inside the credential-free sandbox.
 6. After the fix passes, inspect trusted `.github/claude-triage.yml`. If it configures a preview,
    create a concise demonstration in that directory. The same example must make the reported bug
    apparent with the current released package and make the corrected behavior apparent with the
    fixed workspace package that pkg.pr.new will publish. Prefer a natural, user-observable manual
    reproduction; simulated interaction is not required. Do not use a proxy signal that can pass in
    both the released and fixed versions. Make one initial attempt and at most one repair attempt;
-   remove incomplete preview changes if validation still fails.
+   remove incomplete preview changes if validation still fails. Re-run the configured validation
+   after every preview edit; a deterministic step repeats it after the session and withdraws
+   `previewReady` when it fails.
 7. Inspect the final diff and status, remove scratch files, and leave only the fix, regression tests,
    and successfully validated preview.
 8. Return the required structured result even when no safe fix can be produced.

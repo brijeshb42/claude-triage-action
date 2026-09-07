@@ -1,3 +1,5 @@
+import { describePreviewValidation, type PreviewValidationOutcome } from './preview-validation.js';
+
 export interface AgentResult {
   summary: string;
   probableCause: string;
@@ -105,4 +107,26 @@ export function selectAgentResult(
   }
 
   return createApiFailureResult(executionMessages) ?? DEFAULT_AGENT_RESULT;
+}
+
+/**
+ * Fold the deterministic sandbox validation into the model's preview claim. The model can
+ * say a preview is ready, but only a passing re-run of the repository's own validation
+ * commands after the session keeps that claim. A repository with no validation commands
+ * opts out and keeps the model's claim.
+ */
+export function applyPreviewValidation(
+  result: AgentResult,
+  outcome: PreviewValidationOutcome | undefined,
+): AgentResult {
+  const description = outcome
+    ? describePreviewValidation(outcome)
+    : 'Deterministic preview validation did not run.';
+  const validated = outcome?.status === 'passed' || outcome?.status === 'skipped';
+
+  return {
+    ...result,
+    previewReady: result.previewReady && validated,
+    previewValidation: `${result.previewValidation}\n${description}`.trim(),
+  };
 }

@@ -2,6 +2,7 @@
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import * as path from 'node:path';
 import { TRIAGE_ARTIFACT_SCHEMA_VERSION, TRIAGE_ELIGIBILITY_DAYS } from './triage-artifact.js';
+import { formatTimeline, formatTimelineSummary } from './execution-timeline.js';
 import { createRunMetadata } from './run-metadata.js';
 import {
   formatTriageLogLine,
@@ -68,8 +69,13 @@ await writeFile(
 await writeFile(path.join(outputDirectory, 'triage-result.json'), JSON.stringify(result, null, 2));
 
 console.log(formatTriageLogLine(result));
+console.log(formatTimeline(executionMessages));
 if (process.env.GITHUB_STEP_SUMMARY) {
-  await writeFile(process.env.GITHUB_STEP_SUMMARY, formatTriageStepSummary(result), { flag: 'a' });
+  await writeFile(
+    process.env.GITHUB_STEP_SUMMARY,
+    formatTriageStepSummary(result) + formatTimelineSummary(executionMessages),
+    { flag: 'a' },
+  );
 }
 
 if (process.env.GITHUB_OUTPUT) {

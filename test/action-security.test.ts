@@ -162,6 +162,30 @@ describe('triage action isolation', () => {
     assert.doesNotMatch(fix, /permission-issues: write/);
   });
 
+  it('re-validates the preview deterministically before trusting the model claim', async () => {
+    const fix = await readFile(fixActionPath, 'utf8');
+
+    assert.match(fix, /- name: Validate the preview deterministically after Claude/);
+    assert.match(fix, /validate-preview/);
+    assert.match(fix, /^\s+preview-validation-timeout-ms:$/m);
+    assert.match(
+      fix,
+      /^\s+PREVIEW_VALIDATION_PATH: \$\{\{ runner\.temp \}\}\/claude-fix\/preview-validation\.json$/m,
+    );
+    assert.match(fix, /a deterministic step re-runs the configured preview validation/);
+    assert.ok(
+      fix.indexOf('- name: Validate the preview deterministically after Claude') <
+        fix.indexOf('- name: Save fix result'),
+    );
+  });
+
+  it('reports the triage validation plan as a checklist before the fix runs', async () => {
+    const reporter = await readFile(reporterPath, 'utf8');
+
+    assert.match(reporter, /\*\*Validation plan:\*\*/);
+    assert.match(reporter, /result\.validationPlan\.map\(\(item\) => `- \[ \] \$\{item\}`\)/);
+  });
+
   it('keeps issue mutation in a model-free reporter', async () => {
     const reporter = await readFile(reporterPath, 'utf8');
 

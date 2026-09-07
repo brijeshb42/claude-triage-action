@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { selectAgentResult } from '../src/agent-result.js';
+import { applyPreviewValidation, selectAgentResult } from '../src/agent-result.js';
 
 describe('selectAgentResult', () => {
   it('prefers a valid structured result', () => {
@@ -46,5 +46,66 @@ describe('selectAgentResult', () => {
     assert.equal(result.confidence, 'low');
     assert.equal(result.fixAttempted, false);
     assert.match(result.summary, /did not return a structured triage result/);
+  });
+});
+
+describe('applyPreviewValidation', () => {
+  const claimed = {
+    summary: 's',
+    probableCause: 'p',
+    confidence: 'high' as const,
+    fixAttempted: true,
+    fixComplete: true,
+    prTitle: 't',
+    prBody: 'b',
+    validation: 'v',
+    previewAttempted: true,
+    previewReady: true,
+    previewValidation: 'Model ran the build.',
+  };
+
+  it('keeps a claimed preview only when the deterministic run passed', () => {
+    const result = applyPreviewValidation(claimed, { status: 'passed', commands: 2 });
+
+    assert.equal(result.previewReady, true);
+    assert.equal(
+      result.previewValidation,
+      'Model ran the build.\nDeterministic preview validation passed (2 commands).',
+    );
+  });
+
+  it('withdraws the claim when validation failed, found no changes, or did not run', () => {
+    const failed = applyPreviewValidation(claimed, {
+      status: 'failed',
+      command: 'pnpm build',
+      exitCode: 1,
+      output: 'boom',
+    });
+    assert.equal(failed.previewReady, false);
+    assert.match(failed.previewValidation, /"pnpm build" exited with code 1/);
+
+    assert.equal(applyPreviewValidation(claimed, { status: 'unchanged' }).previewReady, false);
+
+    const missing = applyPreviewValidation(claimed, undefined);
+    assert.equal(missing.previewReady, false);
+    assert.match(missing.previewValidation, /did not run/);
+  });
+
+  it('honors the claim when the repository configures no validation commands', () => {
+    const result = applyPreviewValidation(claimed, {
+      status: 'skipped',
+      reason: 'no preview validation commands are configured',
+    });
+
+    assert.equal(result.previewReady, true);
+  });
+
+  it('never promotes an unclaimed preview', () => {
+    const result = applyPreviewValidation(
+      { ...claimed, previewReady: false },
+      { status: 'passed', commands: 2 },
+    );
+
+    assert.equal(result.previewReady, false);
   });
 });

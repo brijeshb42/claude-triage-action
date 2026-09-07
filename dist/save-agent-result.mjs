@@ -3,6 +3,40 @@
 // src/save-agent-result.ts
 import { readFile, writeFile } from "node:fs/promises";
 
+// src/preview-validation.ts
+function isRecord(value) {
+  return typeof value === "object" && value !== null;
+}
+function isPreviewValidationOutcome(value) {
+  if (!isRecord(value)) {
+    return false;
+  }
+  switch (value.status) {
+    case "skipped":
+      return typeof value.reason === "string";
+    case "unchanged":
+      return true;
+    case "passed":
+      return typeof value.commands === "number";
+    case "failed":
+      return typeof value.command === "string" && typeof value.exitCode === "number" && typeof value.output === "string";
+    default:
+      return false;
+  }
+}
+function describePreviewValidation(outcome2) {
+  switch (outcome2.status) {
+    case "skipped":
+      return `Deterministic preview validation skipped: ${outcome2.reason}.`;
+    case "unchanged":
+      return "Deterministic preview validation skipped: the preview directory is unchanged.";
+    case "passed":
+      return `Deterministic preview validation passed (${outcome2.commands} commands).`;
+    case "failed":
+      return `Deterministic preview validation failed: ${JSON.stringify(outcome2.command)} exited with code ${outcome2.exitCode}.`;
+  }
+}
+
 // src/agent-result.ts
 var DEFAULT_AGENT_RESULT = {
   summary: "Claude did not return a structured triage result.",
@@ -17,11 +51,11 @@ var DEFAULT_AGENT_RESULT = {
   previewReady: false,
   previewValidation: "No preview validation result was returned."
 };
-function isRecord(value) {
+function isRecord2(value) {
   return typeof value === "object" && value !== null;
 }
 function isAgentResult(value) {
-  if (!isRecord(value)) {
+  if (!isRecord2(value)) {
     return false;
   }
   return typeof value.summary === "string" && typeof value.probableCause === "string" && (value.confidence === "low" || value.confidence === "medium" || value.confidence === "high") && typeof value.fixAttempted === "boolean" && typeof value.fixComplete === "boolean" && typeof value.prTitle === "string" && typeof value.prBody === "string" && typeof value.validation === "string" && typeof value.previewAttempted === "boolean" && typeof value.previewReady === "boolean" && typeof value.previewValidation === "string";
@@ -31,9 +65,9 @@ function createApiFailureResult(executionMessages2) {
     return void 0;
   }
   const terminalResult = executionMessages2.findLast(
-    (message) => isRecord(message) && message.type === "result" && message.terminal_reason === "api_error"
+    (message) => isRecord2(message) && message.type === "result" && message.terminal_reason === "api_error"
   );
-  if (!isRecord(terminalResult)) {
+  if (!isRecord2(terminalResult)) {
     return void 0;
   }
   const detail = typeof terminalResult.result === "string" ? terminalResult.result : "";
@@ -67,9 +101,139 @@ function selectAgentResult(structuredResultJson, executionMessages2) {
   }
   return createApiFailureResult(executionMessages2) ?? DEFAULT_AGENT_RESULT;
 }
+function applyPreviewValidation(result2, outcome2) {
+  const description = outcome2 ? describePreviewValidation(outcome2) : "Deterministic preview validation did not run.";
+  const validated = outcome2?.status === "passed" || outcome2?.status === "skipped";
+  return {
+    ...result2,
+    previewReady: result2.previewReady && validated,
+    previewValidation: `${result2.previewValidation}
+${description}`.trim()
+  };
+}
+
+// src/execution-timeline.ts
+var INPUT_PREVIEW_CHARS = 100;
+var MAX_ENTRIES = 400;
+var DESCRIPTIVE_INPUT_KEYS = ["command", "skill", "path", "file_path", "pattern", "query", "cwd"];
+function isRecord3(value) {
+  return typeof value === "object" && value !== null;
+}
+function compact(value, maximumLength) {
+  const compacted = value.replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g, "").replace(/\s+/g, " ").trim();
+  return compacted.length <= maximumLength ? compacted : `${compacted.slice(0, maximumLength - 1)}\u2026`;
+}
+function describeInput(input) {
+  if (!isRecord3(input)) {
+    return "";
+  }
+  for (const key of DESCRIPTIVE_INPUT_KEYS) {
+    const value = input[key];
+    if (typeof value === "string" && value.trim()) {
+      return compact(value, INPUT_PREVIEW_CHARS);
+    }
+  }
+  const firstString = Object.values(input).find(
+    (value) => typeof value === "string" && value.trim() !== ""
+  );
+  return firstString === void 0 ? "" : compact(firstString, INPUT_PREVIEW_CHARS);
+}
+function contentLength(content) {
+  if (typeof content === "string") {
+    return content.length;
+  }
+  if (!Array.isArray(content)) {
+    return 0;
+  }
+  return content.reduce(
+    (total, block) => total + (isRecord3(block) && typeof block.text === "string" ? block.text.length : 0),
+    0
+  );
+}
+function messageBlocks(message) {
+  if (!isRecord3(message) || !isRecord3(message.message) || !Array.isArray(message.message.content)) {
+    return [];
+  }
+  return message.message.content.filter(isRecord3);
+}
+function extractTimeline(executionMessages2) {
+  if (!Array.isArray(executionMessages2)) {
+    return [];
+  }
+  const entries = [];
+  const entryByToolUseId = /* @__PURE__ */ new Map();
+  let turn = 0;
+  for (const message of executionMessages2) {
+    if (!isRecord3(message)) {
+      continue;
+    }
+    if (message.type === "assistant") {
+      turn += 1;
+      for (const block of messageBlocks(message)) {
+        if (block.type !== "tool_use" || typeof block.name !== "string") {
+          continue;
+        }
+        const entry = { turn, tool: block.name, input: describeInput(block.input) };
+        entries.push(entry);
+        if (typeof block.id === "string") {
+          entryByToolUseId.set(block.id, entry);
+        }
+      }
+      continue;
+    }
+    if (message.type !== "user") {
+      continue;
+    }
+    for (const block of messageBlocks(message)) {
+      if (block.type !== "tool_result" || typeof block.tool_use_id !== "string") {
+        continue;
+      }
+      const entry = entryByToolUseId.get(block.tool_use_id);
+      if (!entry) {
+        continue;
+      }
+      entry.resultChars = contentLength(block.content);
+      if (block.is_error === true) {
+        entry.isError = true;
+      }
+    }
+  }
+  return entries;
+}
+function formatChars(chars) {
+  return chars >= 1e3 ? `${(chars / 1e3).toFixed(1)}k chars` : `${chars} chars`;
+}
+function formatEntry(entry, toolWidth) {
+  const outcome2 = entry.isError === true ? "error" : entry.resultChars === void 0 ? "no result" : formatChars(entry.resultChars);
+  return `turn ${String(entry.turn).padEnd(4)} ${entry.tool.padEnd(toolWidth)} ${entry.input}  \u2192 ${outcome2}`;
+}
+function formatTimeline(executionMessages2) {
+  const entries = extractTimeline(executionMessages2).slice(0, MAX_ENTRIES);
+  if (entries.length === 0) {
+    return "Claude timeline: no tool calls were recorded.";
+  }
+  const toolWidth = Math.max(...entries.map((entry) => entry.tool.length));
+  const errors = entries.filter((entry) => entry.isError === true).length;
+  const header = `Claude timeline: ${entries.length} tool calls over ${entries.at(-1)?.turn} turns, ${errors} errored.`;
+  return [header, ...entries.map((entry) => formatEntry(entry, toolWidth))].join("\n");
+}
+function escapeHtml(value) {
+  return value.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;");
+}
+function formatTimelineSummary(executionMessages2) {
+  return [
+    "<details>",
+    "<summary>Claude tool timeline</summary>",
+    "",
+    `<pre>${escapeHtml(formatTimeline(executionMessages2))}</pre>`,
+    "",
+    "</details>",
+    ""
+  ].join("\n");
+}
 
 // src/run-metadata.ts
-function isRecord2(value) {
+function isRecord4(value) {
   return typeof value === "object" && value !== null;
 }
 function isReasoningEffort(value) {
@@ -92,8 +256,8 @@ function createRunMetadata(executionMessages2, configuration) {
   if (!isReasoningEffort(configuration.reasoningEffort)) {
     throw new Error(`Unsupported reasoning effort: ${configuration.reasoningEffort}`);
   }
-  const terminalResult = Array.isArray(executionMessages2) ? executionMessages2.findLast((message) => isRecord2(message) && message.type === "result") : void 0;
-  const result2 = isRecord2(terminalResult) ? terminalResult : {};
+  const terminalResult = Array.isArray(executionMessages2) ? executionMessages2.findLast((message) => isRecord4(message) && message.type === "result") : void 0;
+  const result2 = isRecord4(terminalResult) ? terminalResult : {};
   const turns = optionalTurnCount(result2.num_turns);
   const durationMs = optionalNonNegativeNumber(result2.duration_ms);
   const costUsd = optionalNonNegativeNumber(result2.total_cost_usd);
@@ -112,18 +276,32 @@ var resultPath = process.env.RESULT_PATH;
 if (!resultPath) {
   throw new Error("RESULT_PATH is required.");
 }
-var executionMessages;
-if (process.env.EXECUTION_FILE) {
+async function readOptionalJson(filePath) {
+  if (!filePath) {
+    return void 0;
+  }
   try {
-    executionMessages = JSON.parse(await readFile(process.env.EXECUTION_FILE, "utf8"));
+    return JSON.parse(await readFile(filePath, "utf8"));
   } catch {
-    executionMessages = void 0;
+    return void 0;
   }
 }
-var result = selectAgentResult(process.env.RESULT_JSON, executionMessages);
+var executionMessages = await readOptionalJson(process.env.EXECUTION_FILE);
+var previewValidation = await readOptionalJson(process.env.PREVIEW_VALIDATION_PATH);
+var outcome = isPreviewValidationOutcome(previewValidation) ? previewValidation : void 0;
+var result = applyPreviewValidation(
+  selectAgentResult(process.env.RESULT_JSON, executionMessages),
+  outcome
+);
 var runMetadata = createRunMetadata(executionMessages, {
   model: process.env.MODEL || "",
   reasoningEffort: process.env.REASONING_EFFORT || ""
 });
 await writeFile(resultPath, JSON.stringify({ ...result, runMetadata }, null, 2));
+console.log(formatTimeline(executionMessages));
+if (process.env.GITHUB_STEP_SUMMARY) {
+  await writeFile(process.env.GITHUB_STEP_SUMMARY, formatTimelineSummary(executionMessages), {
+    flag: "a"
+  });
+}
 //# sourceMappingURL=save-agent-result.mjs.map

@@ -86,6 +86,7 @@ test(
     const directory = await mkdtemp(path.join(tmpdir(), 'runner-integration-'));
     try {
       await writeFile(path.join(directory, 'fixture.txt'), 'broken\n');
+      await writeFile(path.join(directory, '.gitignore'), 'node_modules/\n');
       await writeFile(
         path.join(directory, 'package.json'),
         JSON.stringify({
@@ -99,7 +100,7 @@ test(
       await command('git', ['init', '-b', 'main'], directory);
       await command('git', ['config', 'user.name', 'Fixture'], directory);
       await command('git', ['config', 'user.email', 'fixture@example.invalid'], directory);
-      await command('git', ['add', 'fixture.txt', 'package.json'], directory);
+      await command('git', ['add', 'fixture.txt', 'package.json', '.gitignore'], directory);
       await command('git', ['commit', '-m', 'fixture baseline'], directory);
       const outputDirectory = path.join(directory, 'result');
       const options: RunnerOptions = {

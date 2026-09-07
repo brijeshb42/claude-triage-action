@@ -1,0 +1,48 @@
+name: Publish runner image
+
+on:
+  push:
+    branches: [main, runner-native-sandbox]
+    paths:
+      - 'runner/Dockerfile'
+      - 'runner/.dockerignore'
+      - 'runner/settings.json'
+      - 'runner/mcp.json'
+      - '.github/workflows/runner-image.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Build credential-free image
+        run: |
+          docker build --label "org.opencontainers.image.source=https://github.com/$GITHUB_REPOSITORY" \
+            --label "org.opencontainers.image.revision=$GITHUB_SHA" \
+            --tag "ghcr.io/$GITHUB_REPOSITORY_OWNER/claude-triage-runner:sha-$GITHUB_SHA" runner
+      - name: Publish immutable release reference
+        env:
+          REGISTRY_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          trap 'docker logout ghcr.io' EXIT
+          echo "$REGISTRY_TOKEN" | docker login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
+          image="ghcr.io/$GITHUB_REPOSITORY_OWNER/claude-triage-runner:sha-$GITHUB_SHA"
+          docker push "$image"
+          docker inspect --format '{{index .RepoDigests 0}}' "$image" | tee runner-image.txt
+          echo 'Pin this digest in runner/image.txt after the gVisor smoke test:' >> "$GITHUB_STEP_SUMMARY"
+          cat runner-image.txt >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: runner-image-digest
+          path: runner-image.txt

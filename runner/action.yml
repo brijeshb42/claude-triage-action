@@ -105,7 +105,12 @@ runs:
         RUNNER_MAX_REQUESTS: ${{ inputs.max-api-requests }}
         RUNNER_MAX_TOKENS: ${{ inputs.max-output-tokens-per-request }}
         RUNNER_TIMEOUT_MS: ${{ inputs.agent-timeout-ms }}
-      run: node "$GITHUB_ACTION_PATH/../dist/runner-main.mjs"
+      run: |
+        set -euo pipefail
+        log_marker="$(openssl rand -hex 24)"
+        echo "::stop-commands::$log_marker"
+        trap 'echo "::$log_marker::"' EXIT
+        node "$GITHUB_ACTION_PATH/../dist/runner-main.mjs"
 
     - name: Upload the untrusted result and patch
       if: always() && steps.agent.outputs.artifact-directory != ''

@@ -55,7 +55,10 @@ bounded by the runner's available disk, not a per-volume quota.
 
 The host firewall permits only the credential gateway port from the sandbox to
 the host, and blocks forwarded private, link-local, and reserved IPv4 ranges.
-Public outbound access is enabled for dependencies and tests. This is not a data
+Public outbound access is enabled for dependencies and tests. A single read-only
+bind of the action's credential-free `resolv.conf` supplies public DNS resolvers
+(1.1.1.1 and 8.8.8.8); Docker's embedded loopback resolver is inaccessible inside
+gVisor. This is not a data
 loss prevention system: sandbox code can send source to public services.
 
 Claude gets an ephemeral gateway capability, not an Anthropic or GitHub token.

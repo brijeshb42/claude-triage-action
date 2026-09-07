@@ -32,6 +32,11 @@ jobs:
           node-version: 22.23.2
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      - name: Verify the checked-in supervisor bundle
+        run: |
+          pnpm build
+          node --check dist/runner-main.mjs
+          git diff --exit-code -- dist
       - name: Install the pinned gVisor distribution
         run: bash runner/install-runsc.sh
       - name: Build the independent agent image

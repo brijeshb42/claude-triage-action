@@ -5,7 +5,7 @@ import { randomBytes as randomBytes3 } from "node:crypto";
 import { createReadStream as createReadStream2 } from "node:fs";
 import { appendFile, lstat as lstat2, mkdir, mkdtemp as mkdtemp2, readFile, writeFile } from "node:fs/promises";
 import * as path2 from "node:path";
-import { pathToFileURL } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 // src/archive.ts
 import { execFile, spawn } from "node:child_process";
@@ -781,6 +781,9 @@ async function runProcess(command, args, options = {}) {
 }
 
 // src/runner-main.ts
+var RUNNER_RESOLVER_PATH = fileURLToPath(
+  new URL("../runner/resolv.conf", import.meta.url)
+);
 var RUNNER_RESULT_SCHEMA = {
   type: "object",
   additionalProperties: false,
@@ -942,6 +945,8 @@ async function runRunner(options, gatewayFactory, signal) {
       "/home/node:rw,nosuid,nodev,size=256m,uid=1000,gid=1000,mode=700",
       "--mount",
       `type=volume,src=${volume},dst=/workspace`,
+      "--mount",
+      `type=bind,src=${RUNNER_RESOLVER_PATH},dst=/etc/resolv.conf,readonly`,
       options.image
     ]);
     await docker(["start", container]);
@@ -1204,6 +1209,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   });
 }
 export {
+  RUNNER_RESOLVER_PATH,
   RUNNER_RESULT_SCHEMA,
   claudeArguments,
   runRunner

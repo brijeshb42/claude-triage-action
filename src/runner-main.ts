@@ -3,7 +3,7 @@ import { randomBytes } from 'node:crypto';
 import { createReadStream } from 'node:fs';
 import { appendFile, lstat, mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import * as path from 'node:path';
-import { pathToFileURL } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { createRepositoryArchive } from './archive.js';
 import { selectAgentResult } from './agent-result.js';
 import { detectDependencyInstallPlan } from './dependency-install.js';
@@ -12,6 +12,11 @@ import { createRunnerCredentialProvider } from './runner-auth.js';
 import { startRunnerGateway, type RunnerGateway } from './runner-gateway.js';
 import { RunnerNetwork } from './runner-network.js';
 import { runProcess } from './runner-process.js';
+
+// The only host bind is this credential-free, read-only resolver configuration.
+export const RUNNER_RESOLVER_PATH = fileURLToPath(
+  new URL('../runner/resolv.conf', import.meta.url),
+);
 
 export interface RunnerOptions {
   repositoryDirectory: string;
@@ -203,6 +208,8 @@ export async function runRunner(
       '/home/node:rw,nosuid,nodev,size=256m,uid=1000,gid=1000,mode=700',
       '--mount',
       `type=volume,src=${volume},dst=/workspace`,
+      '--mount',
+      `type=bind,src=${RUNNER_RESOLVER_PATH},dst=/etc/resolv.conf,readonly`,
       options.image,
     ]);
     await docker(['start', container]);

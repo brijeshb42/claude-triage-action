@@ -4,7 +4,7 @@ import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import * as path from 'node:path';
 import { test } from 'node:test';
-import { runRunner, type RunnerOptions } from '../src/runner-main.js';
+import type { runRunner as RunnerFunction, RunnerOptions } from '../src/runner-main.js';
 import { startRunnerGateway } from '../src/runner-gateway.js';
 import { RunnerNetwork } from '../src/runner-network.js';
 import { runProcess } from '../src/runner-process.js';
@@ -12,6 +12,13 @@ import { createFixtureApi } from './fixtures/runner-api.js';
 
 const enabled = process.env.RUNNER_INTEGRATION === '1';
 const image = process.env.RUNNER_TEST_IMAGE || 'claude-runner-ci';
+// Exercise the shipped bundle, not just the TypeScript implementation.
+const { runRunner, RUNNER_RESOLVER_PATH } = (await import(
+  new URL('../dist/runner-main.mjs', import.meta.url).href
+)) as {
+  runRunner: typeof RunnerFunction;
+  RUNNER_RESOLVER_PATH: string;
+};
 const command = async (name: string, args: string[], cwd?: string) => {
   const result = await runProcess(name, args, { ...(cwd ? { cwd } : {}) });
   assert.equal(result.exitCode, 0, result.stderr);
@@ -47,6 +54,8 @@ test(
         'ALL',
         '--security-opt',
         'no-new-privileges',
+        '--mount',
+        `type=bind,src=${RUNNER_RESOLVER_PATH},dst=/etc/resolv.conf,readonly`,
         image,
       ]);
       const exec = (script: string) => command('docker', ['exec', name, 'bash', '-c', script]);

@@ -33,6 +33,10 @@ appropriately scoped GitHub App token only to the publisher.
 - Docker's iptables backend and passwordless sudo, as supplied by that runner.
 - A clean tracked checkout of trusted base source. Submodules are unsupported.
 - The image includes Node 22.23.2, pnpm 11.22.0, and Claude Code 2.1.241.
+  pnpm automatically selects the version declared in the repository's
+  `packageManager` field. Its managed CLI, package store, cache, and temporary
+  build files live outside the source tree in the disposable workspace volume,
+  where execution is allowed and files survive container process restarts.
   Repository Node auto-selection is not implemented in this independent action.
   Use repositories compatible with that runtime. npm and Yarn lockfiles are
   recognized; custom install commands are supported inside the sandbox.

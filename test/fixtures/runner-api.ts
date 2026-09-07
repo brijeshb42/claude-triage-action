@@ -57,7 +57,7 @@ export function createFixtureApi(): typeof fetch {
         id: `toolu_fixture_bash_${messages}`,
         name: bash.name,
         input: {
-          command: `printf 'fixed\\n' > fixture.txt && node -e 'require("node:assert/strict").equal(require("node:fs").readFileSync("fixture.txt", "utf8"), "fixed\\n")'`,
+          command: `pnpm --version > /dev/null && printf 'fixed\\n' > fixture.txt && node -e 'require("node:assert/strict").equal(require("node:fs").readFileSync("fixture.txt", "utf8"), "fixed\\n")'`,
           description: 'Fix fixture.txt and validate its exact contents',
           timeout: 10000,
         },

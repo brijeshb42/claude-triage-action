@@ -10,7 +10,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 COPY settings.json /opt/runner/settings.json
 COPY mcp.json /opt/runner/mcp.json
-RUN mkdir -p /workspace /home/node/.claude && chown node:node /workspace /home/node/.claude
+# pnpm's managed CLI and linked package store must be executable and survive the
+# process-killing restarts. The isolated home tmpfs deliberately remains noexec.
+ENV XDG_DATA_HOME=/workspace/.runner-data
+ENV XDG_CACHE_HOME=/workspace/.runner-cache
+ENV TMPDIR=/workspace/.runner-tmp
+RUN mkdir -p /workspace/.runner-data /workspace/.runner-cache /workspace/.runner-tmp /home/node/.claude \
+    && chown -R node:node /workspace /home/node/.claude
 USER node
 WORKDIR /workspace
 ENTRYPOINT ["sleep", "infinity"]

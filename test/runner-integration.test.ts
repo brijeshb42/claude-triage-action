@@ -86,10 +86,19 @@ test(
     const directory = await mkdtemp(path.join(tmpdir(), 'runner-integration-'));
     try {
       await writeFile(path.join(directory, 'fixture.txt'), 'broken\n');
+      await writeFile(
+        path.join(directory, 'package.json'),
+        JSON.stringify({
+          name: 'runner-fixture',
+          private: true,
+          packageManager: 'pnpm@11.24.0',
+          engines: { pnpm: '11.24.0' },
+        }),
+      );
       await command('git', ['init', '-b', 'main'], directory);
       await command('git', ['config', 'user.name', 'Fixture'], directory);
       await command('git', ['config', 'user.email', 'fixture@example.invalid'], directory);
-      await command('git', ['add', 'fixture.txt'], directory);
+      await command('git', ['add', 'fixture.txt', 'package.json'], directory);
       await command('git', ['commit', '-m', 'fixture baseline'], directory);
       const outputDirectory = path.join(directory, 'result');
       const options: RunnerOptions = {
@@ -104,7 +113,7 @@ test(
         maxTokens: 16384,
         timeoutMs: 120_000,
         installTimeoutMs: 30_000,
-        installCommand: 'none',
+        installCommand: 'test "$(pnpm --version)" = 11.24.0',
         snapshotExcludes: [],
       };
       await runRunner(options, () =>

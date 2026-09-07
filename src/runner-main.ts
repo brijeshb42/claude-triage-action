@@ -170,7 +170,7 @@ export async function runRunner(
         '--workdir',
         '/workspace/repo',
         '--env',
-        `PATH=${repositoryPath}`,
+        `PATH=${RUNNER_SYSTEM_PATH}`,
         container,
         ...args,
       ],
@@ -291,9 +291,12 @@ export async function runRunner(
     );
     if (plan.command) {
       console.log(`Installing dependencies inside gVisor (${plan.source}).`);
-      await exec(['bash', '-c', `set -euo pipefail\n${plan.command}`], {
-        timeoutMs: options.installTimeoutMs,
-      });
+      await exec(
+        ['env', `PATH=${repositoryPath}`, 'bash', '-c', `set -euo pipefail\n${plan.command}`],
+        {
+          timeoutMs: options.installTimeoutMs,
+        },
+      );
       const status = await exec(['git', 'status', '--porcelain=v1', '--untracked-files=all']);
       if (status.trim()) throw new Error('Dependency installation modified the source baseline.');
     }
